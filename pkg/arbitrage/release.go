@@ -134,6 +134,9 @@ func FilesToList(files []File) string {
 	sort.Sort(ByName(files))
 	list := ""
 	for _, f := range files {
+		if strings.HasSuffix(f.Name, "release.info.yaml") {
+			continue
+		}
 		list += f.Name + "{{{" + strconv.FormatInt(f.Size, 10) + "}}}|||"
 	}
 	return strings.TrimRight(list, "|")

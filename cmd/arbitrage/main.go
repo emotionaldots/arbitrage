@@ -7,18 +7,19 @@ package main
 
 import (
 	"compress/gzip"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
-	"strconv"
+	"time"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/jinzhu/gorm"
 
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
@@ -30,15 +31,18 @@ const Usage = `Usage: arbitrage [command] [args...]
 Local directory commands:
 	lookup [dir]:  Find releases with matching hash for directory
 	hash   [dir]:  Print hashes for a torrent directory
-	import [dir]:  Import torrent directory in database
+	import [dir]:  Import torrent directory into database
 
 Database commands:
-	bootstrap:       Downloads a pre-populated database.
-	info [hash|id]:  Print release information for a specific hash or id
-	dump:            Dump the whole database
+	bootstrap:              Downloads a pre-populated database.
+	info [hash|source:id]:  Print release information for a specific hash or id
+	dump:                   Dump the whole database
 
 Tracker API commands:
-	download [source:id]                Download a torrent from tracker
+	download [source:id]          Download a torrent from tracker
+	downthemall [source] [dirs]:  Walk through all subdirectories and download matching torrents
+	tag [dir]                     Download metatadata into file
+	tagthemall [dirs]:            Walk through all subdirectories and download metadata
 
 Example Usage:
 	arbitrage lookup "./Various Artists - The What CD [FLAC]/"
@@ -78,8 +82,14 @@ func (app *App) Run() {
 		app.Dump()
 	case "download":
 		app.Download()
+	case "downthemall":
+		app.DownThemAll()
 	case "bootstrap":
 		app.Bootstrap()
+	case "tag":
+		app.Tag()
+	case "tagthemall":
+		app.TagThemAll()
 	default:
 		fmt.Println(Usage)
 	}
@@ -113,16 +123,6 @@ func (app *App) Info() {
 			fmt.Printf("%s [%d]\n", f.Name, f.Size)
 		}
 	}
-}
-
-func (app *App) GetDatabase() *gorm.DB {
-	db, err := gorm.Open("sqlite3", app.Config.Database)
-	must(err)
-	app.DB = db
-
-	must(db.AutoMigrate(&arbitrage.Release{}).Error)
-
-	return db
 }
 
 func dbSource(r *arbitrage.Release) arbitrage.Release {
@@ -181,22 +181,63 @@ func (app *App) Dump() {
 func (app *App) Download() {
 	source, id := cmd.ParseSourceId(flag.Arg(1))
 	c := app.APIForSource(source)
+	must(c.Download(id, ""))
+}
 
-	u, err := c.CreateDownloadURL(id)
+func (app *App) DownThemAll() {
+	source := flag.Arg(1)
+	dir := flag.Arg(2)
+	fdir, err := os.Open(dir)
+	must(err)
+	defer fdir.Close()
+
+	names, err := fdir.Readdirnames(-1)
 	must(err)
 
-	resp, err := http.Get(u)
+	c := app.APIForSource(source)
+
+	logf, err := os.Create("arbitrage.log")
 	must(err)
-	if resp.StatusCode != 200 {
-		must(errors.New("unexpected status: " + resp.Status))
+	defer logf.Close()
+	lw := io.MultiWriter(os.Stdout, logf)
+	fmt.Fprintf(logf, "#!/usr/bin/env bash\n## arbitrage downthemall %s %q\n\n\n", source, dir)
+
+	db := app.GetDatabase()
+
+	for _, n := range names {
+		r, err := arbitrage.FromFile(dir + "/" + n)
+		must(err)
+
+		releases := make([]*arbitrage.Release, 0)
+		must(db.Where(&arbitrage.Release{
+			ListHash: r.ListHash,
+		}).Find(&releases).Error)
+
+		for _, other := range releases {
+			s, id := cmd.ParseSourceId(other.SourceId)
+			if s != source {
+				continue
+			}
+
+			status := "ok"
+			if r.FilePath != other.FilePath {
+				status = "renamed"
+			}
+
+			if err := c.Download(id, "-"+status); err != nil {
+				log.Printf("[%s] Could not download torrent: %s\n", other.SourceId, err)
+				continue
+			}
+
+			if status == "renamed" {
+				fmt.Fprintf(lw, "mv %q %q    # %s\n", r.FilePath, other.FilePath, other.SourceId)
+			} else {
+				fmt.Fprintf(lw, "# ok %s %q\n", other.SourceId, other.FilePath)
+			}
+			time.Sleep(200 * time.Millisecond) // Rate-limiting
+			break
+		}
 	}
-	defer resp.Body.Close()
-
-	f, err := os.Create(source + "-" + strconv.Itoa(id) + ".torrent")
-	defer f.Close()
-	must(err)
-	_, err = io.Copy(f, resp.Body)
-	must(err)
 }
 
 func (app *App) Bootstrap() {
@@ -222,4 +263,86 @@ func (app *App) Bootstrap() {
 	n, err := io.Copy(f, gz)
 	must(err)
 	fmt.Printf("%d MiB downloaded.", n/1024/1024)
+}
+
+func (app *App) Tag() {
+	dir := flag.Arg(1)
+	sourceId := flag.Arg(2)
+	app.tagSingle(dir, sourceId)
+}
+
+func (app *App) TagThemAll() {
+	dir := flag.Arg(1)
+
+	fdir, err := os.Open(dir)
+	must(err)
+	defer fdir.Close()
+
+	names, err := fdir.Readdirnames(-1)
+	must(err)
+
+	for _, name := range names {
+		app.tagSingle(dir+"/"+name, "")
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func (app *App) tagSingle(dir, sourceId string) {
+	r, err := arbitrage.FromFile(dir)
+	db := app.GetDatabase()
+	must(err)
+
+	sourceIds := make([]string, 0)
+	if sourceId == "" {
+		releases := make([]*arbitrage.Release, 0)
+		must(db.Where(&arbitrage.Release{
+			ListHash: r.ListHash,
+		}).Find(&releases).Error)
+
+		for _, other := range releases {
+			sourceIds = append(sourceIds, other.SourceId)
+		}
+	} else {
+		sourceIds = append(sourceIds, sourceId)
+	}
+
+	if len(sourceIds) == 0 {
+		return
+	}
+
+	info := &arbitrage.Info{
+		Version:     1,
+		FileHash:    r.ListHash,
+		LastUpdated: time.Now(),
+		Releases:    make(map[string]arbitrage.InfoRelease),
+	}
+
+	for _, sourceId := range sourceIds {
+		source, id := cmd.ParseSourceId(sourceId)
+		if _, ok := app.Config.Sources[source]; !ok {
+			continue
+		}
+
+		c := app.APIForSource(source)
+		t, err := c.GetTorrent(id, url.Values{})
+		must(err)
+
+		info.Releases[source] = cmd.ResponseToInfo(t)
+		log.Printf("[%s] %s", sourceId, info.Releases[source])
+	}
+	if len(info.Releases) == 0 {
+		return
+	}
+
+	f, err := os.Create(dir + "/release.info.yaml")
+	must(err)
+
+	y, err := yaml.Marshal(info)
+	must(err)
+
+	_, err = f.Write(y)
+	must(err)
+
+	defer f.Close()
+
 }
