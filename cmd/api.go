@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/kdvh/whatapi"
+	"github.com/emotionaldots/whatapi"
 )
 
 type API struct {

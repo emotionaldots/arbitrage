@@ -15,8 +15,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/whatapi"
 	"github.com/jinzhu/gorm"
-	"github.com/kdvh/whatapi"
 
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
