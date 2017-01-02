@@ -40,8 +40,9 @@ type Config struct {
 }
 
 type App struct {
-	Config Config
-	DB     *gorm.DB
+	Config     Config
+	DB         *gorm.DB
+	ApiClients map[string]*API
 }
 
 func (app *App) GetDatabase() *gorm.DB {
@@ -65,6 +66,7 @@ func (app *App) GetDatabase() *gorm.DB {
 
 func (app *App) Init() {
 	flag.Parse()
+	app.ApiClients = make(map[string]*API)
 
 	cfgDir := os.Getenv("HOME") + "/.config/arbitrage"
 	app.Config.Sources = make(map[string]Source)
@@ -96,6 +98,10 @@ func ParseSourceId(source string) (string, int) {
 }
 
 func (app *App) APIForSource(source string) *API {
+	if c, ok := app.ApiClients[source]; ok {
+		return c
+	}
+
 	parts := strings.SplitN(source, ":", 2)
 	source = parts[0]
 
@@ -109,5 +115,7 @@ func (app *App) APIForSource(source string) *API {
 	must(err)
 	c := &API{w, source}
 	must(c.Login(s.User, s.Password))
+
+	app.ApiClients[source] = c
 	return c
 }
