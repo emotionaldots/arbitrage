@@ -325,7 +325,10 @@ func (app *App) tagSingle(dir, sourceId string) {
 
 		c := app.APIForSource(source)
 		t, err := c.GetTorrent(id, url.Values{})
-		must(err)
+		if err != nil {
+			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
+			continue
+		}
 
 		info.Releases[source] = cmd.ResponseToInfo(t)
 		log.Printf("[%s] %s", sourceId, info.Releases[source])
