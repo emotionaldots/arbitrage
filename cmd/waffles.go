@@ -6,34 +6,23 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
-	"io"
-	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/emotionaldots/whatapi"
+	"github.com/emotionaldots/arbitrage/pkg/waffles"
 )
 
-type API interface {
-	Login(username, password string) error
-	Do(typ string, id int) (resp *arbitrage.Response, err error)
-	Download(id int, suffix string) error
-	FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error)
-	ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease
-}
-
-type GazelleAPI struct {
-	*whatapi.WhatAPI
+type WafflesAPI struct {
+	*waffles.API
 	Source string
 }
 
-func (w *GazelleAPI) Do(typ string, id int) (resp *arbitrage.Response, err error) {
+func (w *WafflesAPI) Do(typ string, id int) (resp *arbitrage.Response, err error) {
 	resp = &arbitrage.Response{
 		Source: w.Source,
 		Type:   typ,
@@ -41,10 +30,10 @@ func (w *GazelleAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 		Time:   time.Now(),
 	}
 
-	var result interface{}
+	var raw []byte
 	switch typ {
 	case "torrent":
-		result, err = w.GetTorrent(id, url.Values{})
+		raw, err = w.DoTorrent(id, url.Values{})
 	default:
 		return nil, errors.New("Unknown type: " + typ)
 	}
@@ -52,65 +41,40 @@ func (w *GazelleAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 		return resp, err
 	}
 
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return resp, err
-	}
 	resp.Response = string(raw)
 	return resp, nil
 }
 
-func (w *GazelleAPI) Download(id int, suffix string) error {
-	u, err := w.CreateDownloadURL(id)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Get(u)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != 200 {
-		return errors.New("unexpected status: " + resp.Status)
-	}
-	defer resp.Body.Close()
-
-	f, err := os.Create(w.Source + "-" + strconv.Itoa(id) + suffix + ".torrent")
-	defer f.Close()
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(f, resp.Body)
-	return err
-}
-
-func (w *GazelleAPI) FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error) {
+func (w *WafflesAPI) FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error) {
 	r := &arbitrage.Release{}
 	if resp.Type != "torrent" {
 		return r, errors.New("Expected response of type 'torrent' not: " + resp.Type)
 	}
 	r.SourceId = resp.Source + ":" + strconv.Itoa(resp.TypeId)
 
-	raw := json.RawMessage(resp.Response)
-	t := whatapi.Torrent{}
-	if err := json.Unmarshal(raw, &t); err != nil {
-		return r, err
+	t, err := w.ParseTorrent([]byte(resp.Response))
+	if err != nil {
+		return nil, err
 	}
+
 	r.FileList = t.Torrent.FileList
 	r.FilePath = t.Torrent.FilePath
+	fmt.Println(t.Group.Name)
 
 	files := arbitrage.ParseFileList(html.UnescapeString(r.FileList))
 	r.FileList = arbitrage.FilesToList(files)
 	r.FilePath = html.UnescapeString(r.FilePath)
 	r.CalculateHashes()
-	return nil, nil
+	return r, nil
 }
 
-func (w *GazelleAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease {
-	raw := json.RawMessage(resp.Response)
-	t := whatapi.Torrent{}
-	must(json.Unmarshal(raw, &t))
+func (w *WafflesAPI) Download(id int, suffix string) error {
+	return nil
+}
+
+func (w *WafflesAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease {
+	t, err := w.ParseTorrent([]byte(resp.Response))
+	must(err)
 
 	r := arbitrage.InfoRelease{}
 	r.Name = t.Group.Name

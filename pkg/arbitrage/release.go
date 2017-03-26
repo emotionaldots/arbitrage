@@ -8,9 +8,6 @@ package arbitrage
 import (
 	"crypto/sha1"
 	"encoding/base32"
-	"encoding/json"
-	"errors"
-	"html"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,32 +31,6 @@ type Release struct {
 type File struct {
 	Name string
 	Size int64
-}
-
-func FromResponse(resp *Response) (*Release, error) {
-	r := &Release{}
-	return r, r.FromResponse(resp)
-}
-
-func (r *Release) FromResponse(resp *Response) error {
-	if resp.Type != "torrent" {
-		return errors.New("Expected response of type 'torrent' not: " + resp.Type)
-	}
-	r.SourceId = resp.Source + ":" + strconv.Itoa(resp.TypeId)
-
-	raw := json.RawMessage(resp.Response)
-	sections := make(map[string]*json.RawMessage)
-	if err := json.Unmarshal(raw, &sections); err != nil {
-		return err
-	}
-	if err := json.Unmarshal([]byte(*sections["torrent"]), r); err != nil {
-		return err
-	}
-	files := ParseFileList(html.UnescapeString(r.FileList))
-	r.FileList = FilesToList(files)
-	r.FilePath = html.UnescapeString(r.FilePath)
-	r.CalculateHashes()
-	return nil
 }
 
 func hash(in string) string {
@@ -117,6 +88,9 @@ func ParseFileList(filestr string) []File {
 	for i, l := range lines {
 		parts := strings.SplitN(l, "{{{", 2)
 		files[i].Name = parts[0]
+		if len(parts) == 1 {
+			continue
+		}
 		size, _ := strconv.ParseInt(strings.TrimRight(parts[1], "}"), 10, 64)
 		files[i].Size = size
 	}

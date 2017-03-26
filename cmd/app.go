@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/arbitrage/pkg/waffles"
 	"github.com/emotionaldots/whatapi"
 	"github.com/jinzhu/gorm"
 
@@ -42,7 +43,7 @@ type Config struct {
 type App struct {
 	Config     Config
 	DB         *gorm.DB
-	ApiClients map[string]*API
+	ApiClients map[string]API
 }
 
 func (app *App) GetDatabase() *gorm.DB {
@@ -66,7 +67,7 @@ func (app *App) GetDatabase() *gorm.DB {
 
 func (app *App) Init() {
 	flag.Parse()
-	app.ApiClients = make(map[string]*API)
+	app.ApiClients = make(map[string]API)
 
 	cfgDir := os.Getenv("HOME") + "/.config/arbitrage"
 	app.Config.Sources = make(map[string]Source)
@@ -97,7 +98,7 @@ func ParseSourceId(source string) (string, int) {
 	return parts[0], id
 }
 
-func (app *App) APIForSource(source string) *API {
+func (app *App) APIForSource(source string) API {
 	if c, ok := app.ApiClients[source]; ok {
 		return c
 	}
@@ -111,9 +112,17 @@ func (app *App) APIForSource(source string) *API {
 	}
 	s.Url = strings.TrimSuffix(s.Url, "/") + "/"
 
-	w, err := whatapi.NewWhatAPI(s.Url)
-	must(err)
-	c := &API{w, source}
+	var c API
+	if source == "wfl" {
+		w, err := waffles.NewAPI(s.Url, "arbitrage/2017-03-26 - EmotionalDots@PTH")
+		must(err)
+		c = &WafflesAPI{w, source}
+
+	} else {
+		w, err := whatapi.NewWhatAPI(s.Url, "arbitrage/2017-02-26 - EmotionalDots@PTH")
+		must(err)
+		c = &GazelleAPI{w, source}
+	}
 	must(c.Login(s.User, s.Password))
 
 	app.ApiClients[source] = c

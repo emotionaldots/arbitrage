@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -324,13 +323,13 @@ func (app *App) tagSingle(dir, sourceId string) {
 		}
 
 		c := app.APIForSource(source)
-		t, err := c.GetTorrent(id, url.Values{})
+		resp, err := c.Do("torrent", id)
 		if err != nil {
 			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
 			continue
 		}
 
-		info.Releases[source] = cmd.ResponseToInfo(t)
+		info.Releases[source] = c.ResponseToInfo(resp)
 		log.Printf("[%s] %s", sourceId, info.Releases[source])
 	}
 	if len(info.Releases) == 0 {

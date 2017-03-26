@@ -6,12 +6,15 @@
 package main
 
 import (
+	"archive/zip"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +28,7 @@ const Usage = `Usage: arbitrage [command] [args...]
 Tracker API commands:
 	scan [source:id...]:       Fetch torrents from trackers, starting at id
 	scantorrent [source:id]:   Fetch a single torrent from tracker
+	scancollages [source]:   Fetch a single collage from tracker
 	recalculate:               Recalculate all hashes from saved API responses
 `
 
@@ -59,6 +63,8 @@ func (app *App) Run() {
 		app.Recalculate()
 	case "serve":
 		app.Serve()
+	case "import":
+		app.Import()
 	default:
 		fmt.Println(Usage)
 	}
@@ -74,7 +80,7 @@ func (app *App) ScanTorrent() {
 	must(err)
 	must(db.Create(resp).Error)
 
-	r, err := arbitrage.FromResponse(resp)
+	r, err := c.FromResponse(resp)
 	must(err)
 	must(db.Where(dbSource(r)).Assign(r).FirstOrCreate(r).Error)
 
@@ -94,9 +100,13 @@ func (app *App) Scan() {
 
 	for resp := range responses {
 		must(db.Create(resp).Error)
+		c := app.APIForSource(resp.Source)
 
-		r, err := arbitrage.FromResponse(resp)
-		must(err)
+		r, err := c.FromResponse(resp)
+		if err != nil {
+			log.Printf("[%s:%d] %s", resp.Source, resp.TypeId, err)
+			continue
+		}
 
 		must(db.Where(dbSource(r)).Assign(r).FirstOrCreate(r).Error)
 		fmt.Println(r.SourceId, r.ListHash, r.FilePath)
@@ -108,8 +118,13 @@ func (app *App) ScanTracker(sourceId string, responses chan *arbitrage.Response)
 	c := app.APIForSource(source)
 	retries, maxId := 0, 0
 
+	backoff := 2 * time.Second
+	if source == "wfl" {
+		backoff = 500 * time.Second
+	}
+
 	for {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(backoff)
 
 		resp, err := c.Do("torrent", id)
 		if err != nil {
@@ -117,7 +132,7 @@ func (app *App) ScanTracker(sourceId string, responses chan *arbitrage.Response)
 
 			if err.Error() == "Request failed: bad id parameter" {
 				if id > maxId {
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(backoff)
 					if _, err := c.Do("torrent", id+200); err == nil {
 						maxId = id + 200
 					}
@@ -159,8 +174,12 @@ func (app *App) Recalculate() {
 
 		tx := db.Begin()
 		for _, resp := range rs {
-			r, err := arbitrage.FromResponse(resp)
-			must(err)
+			c := app.APIForSource(resp.Source)
+			r, err := c.FromResponse(resp)
+			if err != nil {
+				log.Printf("[%s:%d] %s", resp.Source, resp.TypeId, err)
+				continue
+			}
 			must(tx.Where(dbSource(r)).Assign(r).FirstOrCreate(r).Error)
 		}
 		must(tx.Commit().Error)
@@ -212,4 +231,140 @@ func (app *App) handleAjax(w http.ResponseWriter, r *http.Request) {
 	res := AjaxResult{"success", result}
 	raw, _ := json.MarshalIndent(res, "", "    ")
 	w.Write(raw)
+}
+
+var reId = regexp.MustCompile(`_(\d+)_what_cd.json$`)
+
+func (r response) checkStatus() error {
+	if r.Status != "success" {
+		return errors.New("API response error: " + r.Error)
+	}
+	return nil
+}
+
+type response struct {
+	Status   string           `json:"status"`
+	Error    string           `json:"error"`
+	Response *json.RawMessage `json:"response"`
+}
+
+func (app *App) Import() {
+	source := flag.Arg(1)
+	file := flag.Arg(2)
+
+	db := app.GetDatabase()
+
+	z, err := zip.OpenReader(file)
+	must(err)
+
+	responses := make(chan *arbitrage.Response, 10)
+	toStore := make(chan interface{}, 10)
+
+	go func() {
+		for i, f := range z.File {
+			fmt.Println(i, f.Name)
+			match := reId.FindStringSubmatch(f.Name)
+			if match == nil {
+				log.Println("Could not find ID in file name, skipping!")
+				continue
+			}
+			id, err := strconv.Atoi(match[1])
+			must(err)
+
+			rc, err := f.Open()
+			must(err)
+
+			var rawResp response
+			err = json.NewDecoder(rc).Decode(&rawResp)
+			if err == nil {
+				err = rawResp.checkStatus()
+			}
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			resp := &arbitrage.Response{
+				Source:   source,
+				Type:     "torrentgroup",
+				TypeId:   id,
+				Time:     time.Now(),
+				Response: string(*rawResp.Response),
+			}
+			responses <- resp
+			rc.Close()
+		}
+	}()
+
+	go func() {
+		for resp := range responses {
+			toStore <- resp
+			if err := app.InsertTorrentGroup(resp, toStore); err != nil {
+				log.Println(err)
+				continue
+			}
+		}
+	}()
+
+	for v := range toStore {
+		switch r := v.(type) {
+		case *arbitrage.Response:
+			must(db.Create(r).Error)
+		case *arbitrage.Release:
+			must(db.Where(dbSource(r)).Assign(r).FirstOrCreate(r).Error)
+			fmt.Println(r.SourceId, r.ListHash, r.FilePath)
+		}
+	}
+}
+
+type torrentGroup struct {
+	Group    *json.RawMessage   `json:"group"`
+	Torrents []*json.RawMessage `json:"torrents"`
+}
+type torrentSingle struct {
+	Group   *json.RawMessage `json:"group"`
+	Torrent *json.RawMessage `json:"torrent"`
+}
+type torrentPartial struct {
+	Id int `json:"id"`
+}
+
+func (app *App) InsertTorrentGroup(resp *arbitrage.Response, toStore chan interface{}) error {
+	c := app.APIForSource(resp.Source)
+	var group torrentGroup
+	if err := json.Unmarshal([]byte(resp.Response), &group); err != nil {
+		return err
+	}
+
+	if len(group.Torrents) == 0 {
+		return errors.New("No torrents found")
+	}
+	for _, t := range group.Torrents {
+		var partial torrentPartial
+		if err := json.Unmarshal([]byte(*t), &partial); err != nil {
+			return err
+		}
+		if partial.Id == 0 {
+			return errors.New("Missing ID")
+		}
+		ts := torrentSingle{group.Group, t}
+		r2 := &arbitrage.Response{
+			Source: resp.Source,
+			Type:   "torrent",
+			TypeId: partial.Id,
+			Time:   resp.Time,
+		}
+		raw, err := json.Marshal(ts)
+		if err != nil {
+			return err
+		}
+		r2.Response = string(raw)
+		toStore <- r2
+
+		r, err := c.FromResponse(r2)
+		must(err)
+		toStore <- r
+	}
+
+	return nil
 }
