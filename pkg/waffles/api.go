@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/kdvh/whatapi"
+	"github.com/emotionaldots/whatapi"
 )
 
 var (
