@@ -120,7 +120,7 @@ func (app *App) ScanTracker(sourceId string, responses chan *arbitrage.Response)
 
 	backoff := 2 * time.Second
 	if source == "wfl" {
-		backoff = 500 * time.Second
+		backoff = 500 * time.Millisecond
 	}
 
 	for {
