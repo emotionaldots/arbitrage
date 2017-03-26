@@ -228,7 +228,7 @@ func ParseTitle(artist, title string, r *whatapi.Torrent) error {
 
 	mainParts := strings.SplitN(title, " - ", 2)
 	if len(mainParts) == 2 {
-		title = mainParts[2]
+		title = mainParts[1]
 	}
 	matches := reTitle.FindStringSubmatch(title)
 	if matches == nil {
