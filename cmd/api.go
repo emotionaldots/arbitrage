@@ -104,7 +104,7 @@ func (w *GazelleAPI) FromResponse(resp *arbitrage.Response) (*arbitrage.Release,
 	r.FileList = arbitrage.FilesToList(files)
 	r.FilePath = html.UnescapeString(r.FilePath)
 	r.CalculateHashes()
-	return nil, nil
+	return r, nil
 }
 
 func (w *GazelleAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease {
