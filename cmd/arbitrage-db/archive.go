@@ -71,8 +71,7 @@ func (app *App) Convert() {
 			i := 1
 			_, err = tx.CreateBucketIfNotExists(bname)
 			must(err)
-			b := tx.Bucket([]byte("torrent"))
-			must(err)
+			b := tx.Bucket(bname)
 
 			for resp := range ch {
 				var body bytes.Buffer
@@ -89,7 +88,6 @@ func (app *App) Convert() {
 					tx, err = db.Begin(true)
 					must(err)
 					b = tx.Bucket(bname)
-					must(err)
 				}
 			}
 

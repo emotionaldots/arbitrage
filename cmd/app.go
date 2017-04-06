@@ -36,9 +36,10 @@ type Source struct {
 }
 
 type Config struct {
-	Database  string            `toml:"database"`
-	Responses string            `toml:"responses"`
-	Sources   map[string]Source `toml:"sources"`
+	DatabaseType string            `tom:"database_type"`
+	Database     string            `toml:"database"`
+	Responses    string            `toml:"responses"`
+	Sources      map[string]Source `toml:"sources"`
 }
 
 type App struct {
@@ -54,7 +55,17 @@ func (app *App) GetDatabaseForSource(source string) *gorm.DB {
 		return db
 	}
 
-	db, err := gorm.Open("sqlite3", app.ConfigDir+"/"+source+".db")
+	var db *gorm.DB
+	var err error
+	switch app.Config.DatabaseType {
+	case "sqlite3":
+		db, err = gorm.Open("sqlite3", app.Config.Database+"/"+source+".db")
+		must(err)
+		db.DB().SetMaxOpenConns(1)
+	default:
+		var cfg = strings.Replace(app.Config.Database, "arbitrage_db", "arbitrage_"+source, -1)
+		db, err = gorm.Open(app.Config.DatabaseType, cfg)
+	}
 	must(err)
 	app.Indexes[source] = db
 
@@ -83,6 +94,8 @@ func (app *App) Init() {
 	app.Indexes = make(map[string]*gorm.DB)
 
 	app.ConfigDir = os.Getenv("HOME") + "/.config/arbitrage"
+	app.Config.DatabaseType = "sqlite3"
+	app.Config.Database = app.ConfigDir
 	app.Config.Sources = make(map[string]Source)
 
 	f, err := os.Open(app.ConfigDir + "/config.toml")

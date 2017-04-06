@@ -47,7 +47,7 @@ func (w *WafflesAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 func (w *WafflesAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {
 	g := model.GroupAndTorrents{}
 
-	if resp.Type != "torrent" {
+	if resp.Type != "torrent" && resp.Type != "torrent.html" {
 		return g, errors.New("API: unexpected response type: " + resp.Type)
 	}
 

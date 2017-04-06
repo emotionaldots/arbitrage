@@ -44,7 +44,7 @@ func HashFileList(files []File) string {
 	return "FL-" + hash(FilesToList(files))
 }
 
-var reExtensions = regexp.MustCompile(`\.(mp3|flac|mkv|avi|log)$`)
+var reExtensions = regexp.MustCompile(`\.(epub|mobi|mp3|flac|mkv|avi|log)$`)
 
 func HashReducedList(files []File) string {
 	selected := make([]File, 0)
@@ -53,13 +53,22 @@ func HashReducedList(files []File) string {
 			continue
 		}
 		f.Size = RoundBytes(f.Size)
-		files = append(files, f)
+		selected = append(selected, f)
+	}
+	if len(selected) == 0 {
+		for _, f := range files {
+			f.Size = RoundBytes(f.Size)
+			selected = append(selected, f)
+		}
+	}
+	if len(selected) == 0 {
+		return ""
 	}
 	return "RL-" + hash(FilesToList(selected))
 }
 
 func HashDefault(r *Release) {
-	r.HashType = "RS"
+	r.HashType = "RL"
 	r.Hash = HashReducedList(r.FileList)
 }
 

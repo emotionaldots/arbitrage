@@ -14,6 +14,9 @@ import (
 	"github.com/boltdb/bolt"
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+
+	_ "github.com/jinzhu/gorm/dialects/mysql"
+	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
 const Usage = `Usage: arbitrage [command] [args...]
