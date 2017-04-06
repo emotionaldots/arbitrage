@@ -6,19 +6,19 @@
 package main
 
 import (
-	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v2"
 
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
@@ -31,11 +31,6 @@ Local directory commands:
 	lookup [dir]:  Find releases with matching hash for directory
 	hash   [dir]:  Print hashes for a torrent directory
 	import [dir]:  Import torrent directory into database
-
-Database commands:
-	bootstrap:              Downloads a pre-populated database.
-	info [hash|source:id]:  Print release information for a specific hash or id
-	dump:                   Dump the whole database
 
 Tracker API commands:
 	download [source:id]          Download a torrent from tracker
@@ -69,22 +64,12 @@ func (app *App) Run() {
 	switch flag.Arg(0) {
 	case "hash":
 		app.Hash()
-	case "show":
-		app.Info()
-	case "info":
-		app.Info()
-	case "import":
-		app.Import()
 	case "lookup":
 		app.Lookup()
-	case "dump":
-		app.Dump()
 	case "download":
 		app.Download()
 	case "downthemall":
 		app.DownThemAll()
-	case "bootstrap":
-		app.Bootstrap()
 	case "tag":
 		app.Tag()
 	case "tagthemall":
@@ -98,47 +83,12 @@ func (app *App) Hash() {
 	dir := flag.Arg(1)
 	r, err := arbitrage.FromFile(dir)
 	must(err)
-
-	fmt.Println(r.ListHash)
-	// fmt.Println(r.NameHash)
-	// fmt.Println(r.SizeHash)
-}
-
-func (app *App) Info() {
-	arg := flag.Arg(1)
-	db := app.GetDatabase()
-
-	releases := make([]*arbitrage.Release, 0)
-	must(db.Where(&arbitrage.Release{ListHash: arg}).
-		Or(&arbitrage.Release{SourceId: arg}).
-		Or(&arbitrage.Release{FilePath: arg}).
-		Find(&releases).
-		Error)
-
-	for _, r := range releases {
-		fmt.Printf("\n[%d] %s | %s\n%s\n=======================\n", r.Id, r.SourceId, r.ListHash, r.FilePath)
-		files := arbitrage.ParseFileList(r.FileList)
-		for _, f := range files {
-			fmt.Printf("%s [%d]\n", f.Name, f.Size)
-		}
-	}
+	arbitrage.HashDefault(r)
+	fmt.Println(r.Hash)
 }
 
 func dbSource(r *arbitrage.Release) arbitrage.Release {
 	return arbitrage.Release{SourceId: r.SourceId}
-}
-
-func (app *App) Import() {
-	dir := flag.Arg(1)
-	r, err := arbitrage.FromFile(dir)
-	must(err)
-
-	db := app.GetDatabase()
-	must(db.Where(dbSource(r)).Assign(r).FirstOrCreate(r).Error)
-
-	fmt.Println(r.ListHash)
-	// fmt.Println(r.NameHash)
-	// fmt.Println(r.SizeHash)
 }
 
 func (app *App) Lookup() {
@@ -150,7 +100,7 @@ func (app *App) Lookup() {
 
 	releases := make([]*arbitrage.Release, 0)
 	must(db.Where(&arbitrage.Release{
-		ListHash: r.ListHash,
+		Hash: r.Hash,
 	}).Find(&releases).Error)
 
 	for _, other := range releases {
@@ -159,21 +109,6 @@ func (app *App) Lookup() {
 			state = "renamed"
 		}
 		fmt.Println(state, other.SourceId, `"`+other.FilePath+`"`)
-	}
-}
-
-func (app *App) Dump() {
-	db := app.GetDatabase()
-	rows, err := db.Model(&arbitrage.Release{}).
-		Order("list_hash").
-		Rows()
-	must(err)
-	defer rows.Close()
-
-	for rows.Next() {
-		r := &arbitrage.Release{}
-		db.ScanRows(rows, &r)
-		fmt.Println(r.ListHash, r.SourceId, `"`+r.FilePath+`"`)
 	}
 }
 
@@ -209,59 +144,30 @@ func (app *App) DownThemAll() {
 
 		releases := make([]*arbitrage.Release, 0)
 		must(db.Where(&arbitrage.Release{
-			ListHash: r.ListHash,
+			Hash:   r.Hash,
+			Source: source,
 		}).Find(&releases).Error)
 
 		for _, other := range releases {
-			s, id := cmd.ParseSourceId(other.SourceId)
-			if s != source {
-				continue
-			}
-
 			status := "ok"
 			if r.FilePath != other.FilePath {
 				status = "renamed"
 			}
 
-			if err := c.Download(id, "-"+status); err != nil {
-				log.Printf("[%s] Could not download torrent: %s\n", other.SourceId, err)
+			if err := c.Download(int(r.SourceId), "-"+status); err != nil {
+				log.Printf("[%s:%d] Could not download torrent: %s\n", other.Source, other.SourceId, err)
 				continue
 			}
 
 			if status == "renamed" {
-				fmt.Fprintf(lw, "mv %q %q    # %s\n", r.FilePath, other.FilePath, other.SourceId)
+				fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", r.FilePath, other.FilePath, other.Source, other.SourceId)
 			} else {
-				fmt.Fprintf(lw, "# ok %s %q\n", other.SourceId, other.FilePath)
+				fmt.Fprintf(lw, "# ok %s:%d %q\n", other.Source, other.SourceId, other.FilePath)
 			}
 			time.Sleep(200 * time.Millisecond) // Rate-limiting
 			break
 		}
 	}
-}
-
-func (app *App) Bootstrap() {
-	if bootstrapUrl == "" {
-		log.Fatal("No download URL included in this build, please download manually and place in " + app.Config.Database)
-	}
-	f, err := os.OpenFile(app.Config.Database, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
-	if os.IsExist(err) {
-		log.Fatal("Database file " + app.Config.Database + " already exists, aborting boostrap.")
-	}
-	must(err)
-
-	defer f.Close()
-
-	resp, err := http.Get(bootstrapUrl)
-	must(err)
-	defer resp.Body.Close()
-
-	gz, err := gzip.NewReader(resp.Body)
-	must(err)
-
-	fmt.Println("Downloading and unpacking database into " + app.Config.Database + ". This may take a few minutes")
-	n, err := io.Copy(f, gz)
-	must(err)
-	fmt.Printf("%d MiB downloaded.", n/1024/1024)
 }
 
 func (app *App) Tag() {
@@ -295,11 +201,11 @@ func (app *App) tagSingle(dir, sourceId string) {
 	if sourceId == "" {
 		releases := make([]*arbitrage.Release, 0)
 		must(db.Where(&arbitrage.Release{
-			ListHash: r.ListHash,
+			Hash: r.Hash,
 		}).Find(&releases).Error)
 
 		for _, other := range releases {
-			sourceIds = append(sourceIds, other.SourceId)
+			sourceIds = append(sourceIds, fmt.Sprintf("%s:%d", other.Source, other.SourceId))
 		}
 	} else {
 		sourceIds = append(sourceIds, sourceId)
@@ -311,7 +217,7 @@ func (app *App) tagSingle(dir, sourceId string) {
 
 	info := &arbitrage.Info{
 		Version:     1,
-		FileHash:    r.ListHash,
+		FileHash:    r.Hash,
 		LastUpdated: time.Now(),
 		Releases:    make(map[string]arbitrage.InfoRelease),
 	}
@@ -328,8 +234,12 @@ func (app *App) tagSingle(dir, sourceId string) {
 			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
 			continue
 		}
-
-		info.Releases[source] = c.ResponseToInfo(resp)
+		gt, err := c.ParseResponseReleases(*resp)
+		if err != nil {
+			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
+			continue
+		}
+		info.Releases[source] = GroupToInfo(gt)
 		log.Printf("[%s] %s", sourceId, info.Releases[source])
 	}
 	if len(info.Releases) == 0 {
@@ -347,4 +257,55 @@ func (app *App) tagSingle(dir, sourceId string) {
 
 	defer f.Close()
 
+}
+
+func GroupToInfo(gt model.GroupAndTorrents) arbitrage.InfoRelease {
+	g := gt.Group
+	t := gt.Torrents[0]
+
+	r := arbitrage.InfoRelease{}
+	r.Name = g.Name
+	r.TorrentId = t.ID
+	r.FilePath = t.FilePath
+	r.Tags = g.Tags
+	r.Description = g.WikiBody
+	r.Image = g.WikiImage
+
+	r.Format = t.Media + " / " + t.Format
+	if t.HasLog {
+		r.Format += " / " + strconv.Itoa(t.LogScore)
+	}
+
+	if t.Remastered {
+		r.Year = t.RemasterYear
+		r.RecordLabel = t.RemasterRecordLabel
+		r.CatalogueNumber = t.RemasterCatalogueNumber
+		r.Edition = t.RemasterTitle
+	} else {
+		r.Year = g.Year
+		r.RecordLabel = g.RecordLabel
+		r.CatalogueNumber = g.CatalogueNumber
+		r.Edition = "Original Release"
+	}
+
+	for _, a := range g.MusicInfo.Composers {
+		r.Composers = append(r.Composers, a.Name)
+	}
+	for _, a := range g.MusicInfo.Artists {
+		r.Artists = append(r.Artists, a.Name)
+	}
+	for _, a := range g.MusicInfo.With {
+		r.With = append(r.With, a.Name)
+	}
+	for _, a := range g.MusicInfo.DJ {
+		r.DJ = append(r.DJ, a.Name)
+	}
+	for _, a := range g.MusicInfo.RemixedBy {
+		r.RemixedBy = append(r.RemixedBy, a.Name)
+	}
+	for _, a := range g.MusicInfo.Producer {
+		r.Producer = append(r.Producer, a.Name)
+	}
+
+	return r
 }

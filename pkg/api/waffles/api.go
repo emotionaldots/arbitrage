@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/emotionaldots/whatapi"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 )
 
 var (
@@ -149,8 +149,8 @@ type artist struct {
 	Name string `json:"name"`
 }
 
-func (w *API) ParseTorrent(body []byte) (whatapi.Torrent, error) {
-	r := whatapi.Torrent{}
+func (w *API) ParseTorrent(body []byte) (model.TorrentAndGroup, error) {
+	r := model.TorrentAndGroup{}
 
 	b := bytes.NewReader(body)
 	doc, err := goquery.NewDocumentFromReader(b)
@@ -183,13 +183,29 @@ func (w *API) ParseTorrent(body []byte) (whatapi.Torrent, error) {
 	mainTable := row.Closest("tbody")
 	tbl := tabular(mainTable)
 
+	// Torrent ID
+	snatchedField, ok := tbl["Snatched"]
+	if !ok {
+		return r, errors.New("Parsing failed: snatched not found")
+	}
+	snatchedUrl, _ := snatchedField.Find("a").Attr("href")
+	u, err := url.Parse(snatchedUrl)
+	if err != nil {
+		return r, errors.New("Parsing failed: snatched not found: " + err.Error())
+	}
+	r.Torrent.ID, err = strconv.Atoi(u.Query().Get("id"))
+	if err != nil {
+		return r, errors.New("Parsing failed: no id found")
+	}
+	r.Group.ID = r.Torrent.ID
+
 	// Artist
 	artistField, ok := tbl["Artist"]
 	if !ok {
 		return r, errors.New("Parsing failed: no artist found")
 	}
 	artistText := artistField.Find("a").Text()
-	r.Group.MusicInfo.Artists = append(r.Group.MusicInfo.Artists, artist{
+	r.Group.MusicInfo.Artists = append(r.Group.MusicInfo.Artists, model.ArtistLink{
 		Name: artistText,
 	})
 
@@ -217,7 +233,7 @@ func (w *API) ParseTorrent(body []byte) (whatapi.Torrent, error) {
 
 var reTitle = regexp.MustCompile(`(.+) \[([^\]]+)\]$`)
 
-func ParseTitle(artist, title string, r *whatapi.Torrent) error {
+func ParseTitle(artist, title string, r *model.TorrentAndGroup) error {
 	if title == artist {
 		r.Group.Name = title
 		return nil
@@ -229,6 +245,10 @@ func ParseTitle(artist, title string, r *whatapi.Torrent) error {
 	mainParts := strings.SplitN(title, " - ", 2)
 	if len(mainParts) == 2 {
 		title = mainParts[1]
+	}
+	if strings.HasSuffix(title, " (Scene)") {
+		r.Torrent.Scene = true
+		title = strings.TrimSuffix(title, " (Scene)")
 	}
 	matches := reTitle.FindStringSubmatch(title)
 	if matches == nil {

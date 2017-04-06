@@ -10,6 +10,7 @@ import (
 	"encoding/base32"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,13 +18,13 @@ import (
 
 type Release struct {
 	Id       int64  `json:"-"`
-	SourceId string `json:"source_id" gorm:"index:"`
+	Source   string `json:"source"`
+	SourceId int64  `json:"source_id" gorm:"index"`
 
-	ListHash string `json:"list_hash" gorm:"index"`
-	NameHash string `json:"name_hash" gorm:"index"`
-	SizeHash string `json:"size_hash" gorm:"index"`
+	HashType string `json:"hash_type"`
+	Hash     string `json:"hash" gorm:"index"`
 
-	FileList string `json:"fileList" gorm:"type:text"`
+	FileList []File `json:"fileList,omitempty" sql:"-"`
 	FilePath string `json:"filePath" gorm:"type:text"`
 	Time     string `json:"time"`
 }
@@ -39,15 +40,27 @@ func hash(in string) string {
 	return base32.StdEncoding.EncodeToString(slice)
 }
 
-func (r *Release) CalculateHashes() {
-	r.ListHash = "FL-" + hash(r.FileList)
-	r.NameHash = "DN-" + hash(r.FilePath)
+func HashFileList(files []File) string {
+	return "FL-" + hash(FilesToList(files))
+}
 
-	sizeHash := ""
-	for _, f := range ParseFileList(r.FileList) {
-		sizeHash += strconv.FormatInt(f.Size, 10) + "|"
+var reExtensions = regexp.MustCompile(`\.(mp3|flac|mkv|avi|log)$`)
+
+func HashReducedList(files []File) string {
+	selected := make([]File, 0)
+	for _, f := range files {
+		if !reExtensions.MatchString(f.Name) {
+			continue
+		}
+		f.Size = RoundBytes(f.Size)
+		files = append(files, f)
 	}
-	r.SizeHash = "FS-" + hash(strings.TrimRight(sizeHash, "|"))
+	return "RL-" + hash(FilesToList(selected))
+}
+
+func HashDefault(r *Release) {
+	r.HashType = "RS"
+	r.Hash = HashReducedList(r.FileList)
 }
 
 func FromFile(root string) (*Release, error) {
@@ -72,10 +85,9 @@ func FromFile(root string) (*Release, error) {
 
 	r := &Release{
 		FilePath: filepath.Base(root),
-		FileList: FilesToList(files),
+		FileList: files,
 	}
-	r.CalculateHashes()
-	r.SourceId = "file:" + r.ListHash
+	r.Source = "file"
 	return r, nil
 }
 

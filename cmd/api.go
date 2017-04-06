@@ -8,7 +8,6 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,20 +15,20 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/emotionaldots/arbitrage/pkg/api/gazelle"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/emotionaldots/whatapi"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 )
 
 type API interface {
 	Login(username, password string) error
 	Do(typ string, id int) (resp *arbitrage.Response, err error)
 	Download(id int, suffix string) error
-	FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error)
-	ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease
+	ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error)
 }
 
 type GazelleAPI struct {
-	*whatapi.WhatAPI
+	*gazelle.API
 	Source string
 }
 
@@ -85,76 +84,25 @@ func (w *GazelleAPI) Download(id int, suffix string) error {
 	return err
 }
 
-func (w *GazelleAPI) FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error) {
-	r := &arbitrage.Release{}
-	if resp.Type != "torrent" {
-		return r, errors.New("Expected response of type 'torrent' not: " + resp.Type)
-	}
-	r.SourceId = resp.Source + ":" + strconv.Itoa(resp.TypeId)
+func (w *GazelleAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {
+	g := model.GroupAndTorrents{}
 
-	raw := json.RawMessage(resp.Response)
-	t := whatapi.Torrent{}
-	if err := json.Unmarshal(raw, &t); err != nil {
-		return r, err
+	var result interface{}
+	switch resp.Type {
+	case "torrent":
+		gt := model.TorrentAndGroup{}
+		if err := json.Unmarshal([]byte(resp.Response), &gt); err != nil {
+			return g, err
+		}
+		result = gt
+	case "torrentgroup":
+		gt := model.GroupAndTorrents{}
+		if err := json.Unmarshal([]byte(resp.Response), &gt); err != nil {
+			return g, err
+		}
+		result = gt
+	default:
+		return g, errors.New("API: unexpected response type: " + resp.Type)
 	}
-	r.FileList = t.Torrent.FileList
-	r.FilePath = t.Torrent.FilePath
-
-	files := arbitrage.ParseFileList(html.UnescapeString(r.FileList))
-	r.FileList = arbitrage.FilesToList(files)
-	r.FilePath = html.UnescapeString(r.FilePath)
-	r.CalculateHashes()
-	return r, nil
-}
-
-func (w *GazelleAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease {
-	raw := json.RawMessage(resp.Response)
-	t := whatapi.Torrent{}
-	must(json.Unmarshal(raw, &t))
-
-	r := arbitrage.InfoRelease{}
-	r.Name = t.Group.Name
-	r.TorrentId = t.Torrent.ID
-	r.FilePath = t.Torrent.FilePath
-	r.Tags = t.Group.Tags
-	r.Description = t.Group.WikiBody
-	r.Image = t.Group.WikiImage
-
-	r.Format = t.Torrent.Media + " / " + t.Torrent.Format
-	if t.Torrent.HasLog {
-		r.Format += " / " + strconv.Itoa(t.Torrent.LogScore)
-	}
-
-	if t.Torrent.Remastered {
-		r.Year = t.Torrent.RemasterYear
-		r.RecordLabel = t.Torrent.RemasterRecordLabel
-		r.CatalogueNumber = t.Torrent.RemasterCatalogueNumber
-		r.Edition = t.Torrent.RemasterTitle
-	} else {
-		r.Year = t.Group.Year
-		r.RecordLabel = t.Group.RecordLabel
-		r.CatalogueNumber = t.Group.CatalogueNumber
-		r.Edition = "Original Release"
-	}
-
-	for _, a := range t.Group.MusicInfo.Composers {
-		r.Composers = append(r.Composers, a.Name)
-	}
-	for _, a := range t.Group.MusicInfo.Artists {
-		r.Artists = append(r.Artists, a.Name)
-	}
-	for _, a := range t.Group.MusicInfo.With {
-		r.With = append(r.With, a.Name)
-	}
-	for _, a := range t.Group.MusicInfo.DJ {
-		r.DJ = append(r.DJ, a.Name)
-	}
-	for _, a := range t.Group.MusicInfo.RemixedBy {
-		r.RemixedBy = append(r.RemixedBy, a.Name)
-	}
-	for _, a := range t.Group.MusicInfo.Producer {
-		r.Producer = append(r.Producer, a.Name)
-	}
-
-	return r
+	return model.NormalizeTorrentGroups(result)
 }

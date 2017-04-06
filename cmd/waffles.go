@@ -7,14 +7,13 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
-	"html"
 	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/emotionaldots/arbitrage/pkg/api/waffles"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/emotionaldots/arbitrage/pkg/waffles"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 )
 
 type WafflesAPI struct {
@@ -45,27 +44,19 @@ func (w *WafflesAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 	return resp, nil
 }
 
-func (w *WafflesAPI) FromResponse(resp *arbitrage.Response) (*arbitrage.Release, error) {
-	r := &arbitrage.Release{}
+func (w *WafflesAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {
+	g := model.GroupAndTorrents{}
+
 	if resp.Type != "torrent" {
-		return r, errors.New("Expected response of type 'torrent' not: " + resp.Type)
+		return g, errors.New("API: unexpected response type: " + resp.Type)
 	}
-	r.SourceId = resp.Source + ":" + strconv.Itoa(resp.TypeId)
 
 	t, err := w.ParseTorrent([]byte(resp.Response))
 	if err != nil {
-		return nil, err
+		return g, err
 	}
 
-	r.FileList = t.Torrent.FileList
-	r.FilePath = t.Torrent.FilePath
-	fmt.Println(t.Group.Name)
-
-	files := arbitrage.ParseFileList(html.UnescapeString(r.FileList))
-	r.FileList = arbitrage.FilesToList(files)
-	r.FilePath = html.UnescapeString(r.FilePath)
-	r.CalculateHashes()
-	return r, nil
+	return model.NormalizeTorrentGroups(t)
 }
 
 func (w *WafflesAPI) Download(id int, suffix string) error {

@@ -14,9 +14,10 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/emotionaldots/arbitrage/pkg/api/gazelle"
+	"github.com/emotionaldots/arbitrage/pkg/api/waffles"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/emotionaldots/arbitrage/pkg/waffles"
-	"github.com/emotionaldots/whatapi"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 	"github.com/jinzhu/gorm"
 
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
@@ -41,43 +42,54 @@ type Config struct {
 }
 
 type App struct {
+	ConfigDir  string
 	Config     Config
 	DB         *gorm.DB
+	Indexes    map[string]*gorm.DB
 	ApiClients map[string]API
 }
 
-func (app *App) GetDatabase() *gorm.DB {
-	if app.DB != nil {
-		return app.DB
+func (app *App) GetDatabaseForSource(source string) *gorm.DB {
+	if db, ok := app.Indexes[source]; ok {
+		return db
 	}
 
-	db, err := gorm.Open("sqlite3", app.Config.Database)
+	db, err := gorm.Open("sqlite3", app.ConfigDir+"/"+source+".db")
 	must(err)
-	app.DB = db
+	app.Indexes[source] = db
 
-	inited := db.HasTable(arbitrage.Response{})
-	must(db.AutoMigrate(&arbitrage.Release{}).Error)
-	must(db.AutoMigrate(&arbitrage.Response{}).Error)
-	if !inited {
-		db.Model(arbitrage.Response{}).AddIndex("idx_source_id", "source", "type", "type_id")
+	if source == "arbitrage" {
+		inited := db.HasTable(arbitrage.Response{})
+		must(db.AutoMigrate(&arbitrage.Release{}).Error)
+		must(db.AutoMigrate(&arbitrage.Response{}).Error)
+		if !inited {
+			db.Model(arbitrage.Response{}).AddIndex("idx_source_id", "source", "type", "type_id")
+		}
+	} else {
+		must(db.AutoMigrate(model.Torrent{}).Error)
+		must(db.AutoMigrate(model.Group{}).Error)
 	}
 
 	return db
 }
 
+func (app *App) GetDatabase() *gorm.DB {
+	return app.GetDatabaseForSource("arbitrage")
+}
+
 func (app *App) Init() {
 	flag.Parse()
 	app.ApiClients = make(map[string]API)
+	app.Indexes = make(map[string]*gorm.DB)
 
-	cfgDir := os.Getenv("HOME") + "/.config/arbitrage"
+	app.ConfigDir = os.Getenv("HOME") + "/.config/arbitrage"
 	app.Config.Sources = make(map[string]Source)
-	app.Config.Database = cfgDir + "/arbitrage.db"
 
-	f, err := os.Open(cfgDir + "/config.toml")
+	f, err := os.Open(app.ConfigDir + "/config.toml")
 	if os.IsNotExist(err) {
 		app.Config.Sources["example"] = Source{Url: "https://example.com"}
-		must(os.MkdirAll(cfgDir, 0755))
-		f, err = os.Create(cfgDir + "/config.toml")
+		must(os.MkdirAll(app.ConfigDir, 0755))
+		f, err = os.Create(app.ConfigDir + "/config.toml")
 		must(err)
 		must(toml.NewEncoder(f).Encode(app.Config))
 	} else {
@@ -119,11 +131,13 @@ func (app *App) APIForSource(source string) API {
 		c = &WafflesAPI{w, source}
 
 	} else {
-		w, err := whatapi.NewWhatAPI(s.Url, "arbitrage/2017-02-26 - EmotionalDots@PTH")
+		w, err := gazelle.NewAPI(s.Url, "arbitrage/2017-02-26 - EmotionalDots@PTH")
 		must(err)
 		c = &GazelleAPI{w, source}
 	}
-	must(c.Login(s.User, s.Password))
+	if source != "wcd" {
+		must(c.Login(s.User, s.Password))
+	}
 
 	app.ApiClients[source] = c
 	return c
