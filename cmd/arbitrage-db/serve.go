@@ -152,14 +152,14 @@ func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
 	result := make([]minimalRelease, len(releases))
 	for i, r := range releases {
 		result[i] = minimalRelease{
-			Id:       r.Id,
+			Id:       r.SourceId,
 			Hash:     r.Hash,
 			FilePath: r.FilePath,
 		}
 	}
 
 	resp := map[string]interface{}{"torrents": result}
-	res := AjaxResult{"error", resp}
+	res := AjaxResult{"success", resp}
 	raw, _ := json.Marshal(res)
 	w.Write(raw)
 }
