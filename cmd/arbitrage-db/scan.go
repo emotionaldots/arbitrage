@@ -29,6 +29,7 @@ func (app *App) Scan() {
 func (app *App) ScanTracker(sourceId string, responses chan *arbitrage.Response) {
 	source, id := cmd.ParseSourceId(sourceId)
 	c := app.APIForSource(source)
+	app.DoLogin(source)
 	retries, maxId := 0, 0
 
 	backoff := 2 * time.Second

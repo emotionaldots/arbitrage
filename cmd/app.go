@@ -148,10 +148,14 @@ func (app *App) APIForSource(source string) API {
 		must(err)
 		c = &GazelleAPI{w, source}
 	}
-	if source != "wcd" {
-		must(c.Login(s.User, s.Password))
-	}
 
 	app.ApiClients[source] = c
 	return c
+}
+
+func (app *App) DoLogin(source string) {
+	c := app.APIForSource(source)
+	s := app.Config.Sources[source]
+	log.Printf("[%s] Logging into %s as %s", source, s.Url, s.User)
+	must(c.Login(s.User, s.Password))
 }
