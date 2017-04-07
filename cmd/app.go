@@ -36,7 +36,7 @@ type Source struct {
 }
 
 type Config struct {
-	DatabaseType string            `tom:"database_type"`
+	DatabaseType string            `toml:"database_type"`
 	Database     string            `toml:"database"`
 	Responses    string            `toml:"responses"`
 	Sources      map[string]Source `toml:"sources"`

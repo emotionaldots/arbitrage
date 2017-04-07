@@ -127,15 +127,15 @@ func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashes := r.PostForm["hashes"]
-	if len(hashes) == 0 || len(hashes) > 100 {
-		jsonError(w, "Invalid number of hashes given", 400)
+	source := r.PostFormValue("source")
+	if len(source) == 0 || len(source) > 10 {
+		jsonError(w, "No source given", 400)
 		return
 	}
 
-	source := r.PostForm.Get("source")
-	if len(source) == 0 || len(source) > 10 {
-		jsonError(w, "No source given", 400)
+	hashes := r.PostForm["hashes"]
+	if len(hashes) == 0 || len(hashes) > 100 {
+		jsonError(w, "Invalid number of hashes given", 400)
 		return
 	}
 
