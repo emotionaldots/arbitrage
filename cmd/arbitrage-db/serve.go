@@ -18,11 +18,13 @@ import (
 )
 
 func (app *App) Serve() {
-	shortLim := tollbooth.NewLimiter(5, 10*time.Second)
-	shortLim.IPLookups = []string{"RemoteAddr"}
+	ipLookups := []string{"RemoteAddr"}
 
-	longLim := tollbooth.NewLimiter(1000, 24*time.Hour)
-	longLim.IPLookups = []string{"RemoteAddr"}
+	shortLim := tollbooth.NewLimiter(5, 10*time.Second)
+	shortLim.IPLookups = ipLookups
+
+	longLim := tollbooth.NewLimiter(10000, 3*24*time.Hour)
+	longLim.IPLookups = ipLookups
 
 	r := mux.NewRouter()
 	for source := range app.Config.Sources {
@@ -30,10 +32,12 @@ func (app *App) Serve() {
 		r.HandleFunc("/"+source+"/ajax.php", app.handleAjax)
 	}
 
-	apiLim := tollbooth.NewLimiter(100, 24*time.Hour)
-	apiLim.IPLookups = []string{"RemoteAddr"}
+	batchLim := tollbooth.NewLimiter(500, 10*24*time.Hour)
+	batchLim.IPLookups = ipLookups
 	fmt.Println("http://localhost:8321/api/query")
-	r.Handle("/api/query", tollbooth.LimitFuncHandler(apiLim, app.handleApiQuery))
+	fmt.Println("http://localhost:8321/api/query_batch")
+	r.Handle("/api/query_batch", tollbooth.LimitFuncHandler(batchLim, app.handleApiQueryBatch))
+	r.HandleFunc("/api/query", app.handleApiQuery)
 
 	h := tollbooth.LimitHandler(longLim, r)
 	h = tollbooth.LimitHandler(shortLim, h)
@@ -120,7 +124,7 @@ type minimalRelease struct {
 	FilePath string `json:"filePath"`
 }
 
-func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleApiQueryBatch(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	if r.Method != "POST" {
 		http.Error(w, "Bad Request", 400)
@@ -142,6 +146,47 @@ func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
 	db := app.GetDatabase()
 	var releases []*arbitrage.Release
 	err := db.Where("hash IN (?)", hashes).Where(arbitrage.Release{
+		Source: source,
+	}).Find(&releases).Error
+	if err != nil {
+		jsonError(w, err.Error(), 500)
+		return
+	}
+
+	result := make([]minimalRelease, len(releases))
+	for i, r := range releases {
+		result[i] = minimalRelease{
+			Id:       r.SourceId,
+			Hash:     r.Hash,
+			FilePath: r.FilePath,
+		}
+	}
+
+	resp := map[string]interface{}{"torrents": result}
+	res := AjaxResult{"success", resp}
+	raw, _ := json.Marshal(res)
+	w.Write(raw)
+}
+
+func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	source := r.FormValue("source")
+	if len(source) == 0 || len(source) > 10 {
+		jsonError(w, "No source given", 400)
+		return
+	}
+
+	hash := r.FormValue("hash")
+	if len(hash) == 0 {
+		jsonError(w, "No hash given", 400)
+		return
+	}
+
+	db := app.GetDatabase()
+	var releases []*arbitrage.Release
+	err := db.Where(arbitrage.Release{
+		Hash:   hash,
 		Source: source,
 	}).Find(&releases).Error
 	if err != nil {

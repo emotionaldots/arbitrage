@@ -14,13 +14,10 @@ import (
 	"strconv"
 	"time"
 
-	"gopkg.in/yaml.v2"
-
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/arbitrage/pkg/client"
 	"github.com/emotionaldots/arbitrage/pkg/model"
-
-	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
 var bootstrapUrl string
@@ -28,15 +25,12 @@ var bootstrapUrl string
 const Usage = `Usage: arbitrage [command] [args...]
 
 Local directory commands:
-	lookup [dir]:  Find releases with matching hash for directory
-	hash   [dir]:  Print hashes for a torrent directory
-	import [dir]:  Import torrent directory into database
+	lookup [source] [dir]: Find releases with matching hash for directory
+	hash   [dir]:          Print hashes for a torrent directory
 
 Tracker API commands:
 	download [source:id]          Download a torrent from tracker
 	downthemall [source] [dirs]:  Walk through all subdirectories and download matching torrents
-	tag [dir]                     Download metatadata into file
-	tagthemall [dirs]:            Walk through all subdirectories and download metadata
 
 Example Usage:
 	arbitrage lookup "./Various Artists - The What CD [FLAC]/"
@@ -70,10 +64,6 @@ func (app *App) Run() {
 		app.Download()
 	case "downthemall":
 		app.DownThemAll()
-	case "tag":
-		app.Tag()
-	case "tagthemall":
-		app.TagThemAll()
 	default:
 		fmt.Println(Usage)
 	}
@@ -87,40 +77,40 @@ func (app *App) Hash() {
 	fmt.Println(r.Hash)
 }
 
-func dbSource(r *arbitrage.Release) arbitrage.Release {
-	return arbitrage.Release{SourceId: r.SourceId}
-}
-
 func (app *App) Lookup() {
-	dir := flag.Arg(1)
+	source := flag.Arg(1)
+	dir := flag.Arg(2)
 	r, err := arbitrage.FromFile(dir)
 	must(err)
 
-	db := app.GetDatabase()
-
-	releases := make([]*arbitrage.Release, 0)
-	must(db.Where(&arbitrage.Release{
-		Hash: r.Hash,
-	}).Find(&releases).Error)
+	c := client.New(app.Config.Server, cmd.UserAgent)
+	releases, err := c.Query(source, []string{dir})
+	must(err)
 
 	for _, other := range releases {
 		state := "ok"
-		if r.FilePath != other.FilePath {
+		if other.FilePath == "" {
+			state = "no_filepath"
+		} else if r.FilePath != other.FilePath {
 			state = "renamed"
 		}
-		fmt.Println(state, other.SourceId, `"`+other.FilePath+`"`)
+		fmt.Printf("%s %s:%d %q\n", state, source, other.Id, `"`+other.FilePath+`"`)
 	}
 }
 
 func (app *App) Download() {
 	source, id := cmd.ParseSourceId(flag.Arg(1))
-	c := app.APIForSource(source)
+	c := app.DoLogin(source)
 	must(c.Download(id, ""))
 }
 
-func (app *App) DownThemAll() {
-	source := flag.Arg(1)
-	dir := flag.Arg(2)
+type job struct {
+	LocalDir string
+	Hash     string
+	Releases []client.Release
+}
+
+func (app *App) batchQueryDirectory(dir, source string) chan []job {
 	fdir, err := os.Open(dir)
 	must(err)
 	defer fdir.Close()
@@ -128,7 +118,49 @@ func (app *App) DownThemAll() {
 	names, err := fdir.Readdirnames(-1)
 	must(err)
 
-	c := app.APIForSource(source)
+	queue := make(chan []job, 0)
+	c := client.New(app.Config.Server, cmd.UserAgent)
+
+	go func() {
+		hashes := make([]string, 0, 100)
+		jobs := make([]job, 0, 100)
+
+		doQuery := func() {
+			releases, err := c.Query(source, hashes)
+			must(err)
+			byHash := make(map[string][]client.Release, 0)
+			for _, r := range releases {
+				byHash[r.Hash] = append(byHash[r.Hash], r)
+			}
+
+			queue <- jobs
+			hashes = make([]string, 0, 100)
+			jobs = make([]job, 0, 100)
+		}
+
+		for _, n := range names {
+			r, err := arbitrage.FromFile(dir + "/" + n)
+			must(err)
+
+			if len(jobs) >= 100 {
+				doQuery()
+			}
+			jobs = append(jobs, job{r.FilePath, r.Hash, nil})
+			hashes = append(hashes, r.Hash)
+		}
+		if len(jobs) > 0 {
+			doQuery()
+		}
+		close(queue)
+	}()
+	return queue
+}
+
+func (app *App) DownThemAll() {
+	source := flag.Arg(1)
+	dir := flag.Arg(2)
+
+	c := app.DoLogin(source)
 
 	logf, err := os.Create("arbitrage.log")
 	must(err)
@@ -136,127 +168,31 @@ func (app *App) DownThemAll() {
 	lw := io.MultiWriter(os.Stdout, logf)
 	fmt.Fprintf(logf, "#!/usr/bin/env bash\n## arbitrage downthemall %s %q\n\n\n", source, dir)
 
-	db := app.GetDatabase()
+	for jobs := range app.batchQueryDirectory(source, dir) {
+		for _, job := range jobs {
+			for _, other := range job.Releases {
+				status := "ok"
+				if other.FilePath == "" {
+					status = "no_filepath"
+				} else if job.LocalDir != other.FilePath {
+					status = "renamed"
+				}
 
-	for _, n := range names {
-		r, err := arbitrage.FromFile(dir + "/" + n)
-		must(err)
+				if err := c.Download(int(other.Id), "-"+status); err != nil {
+					log.Printf("[%s:%d] Could not download torrent: %s\n", source, other.Id, err)
+					continue
+				}
 
-		releases := make([]*arbitrage.Release, 0)
-		must(db.Where(&arbitrage.Release{
-			Hash:   r.Hash,
-			Source: source,
-		}).Find(&releases).Error)
-
-		for _, other := range releases {
-			status := "ok"
-			if r.FilePath != other.FilePath {
-				status = "renamed"
+				if status == "renamed" {
+					fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", job.LocalDir, other.FilePath, source, other.Id)
+				} else {
+					fmt.Fprintf(lw, "# ok %s:%d %q\n", source, other.Id, other.FilePath)
+				}
+				time.Sleep(200 * time.Millisecond) // Rate-limiting
+				break
 			}
-
-			if err := c.Download(int(r.SourceId), "-"+status); err != nil {
-				log.Printf("[%s:%d] Could not download torrent: %s\n", other.Source, other.SourceId, err)
-				continue
-			}
-
-			if status == "renamed" {
-				fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", r.FilePath, other.FilePath, other.Source, other.SourceId)
-			} else {
-				fmt.Fprintf(lw, "# ok %s:%d %q\n", other.Source, other.SourceId, other.FilePath)
-			}
-			time.Sleep(200 * time.Millisecond) // Rate-limiting
-			break
 		}
 	}
-}
-
-func (app *App) Tag() {
-	dir := flag.Arg(1)
-	sourceId := flag.Arg(2)
-	app.tagSingle(dir, sourceId)
-}
-
-func (app *App) TagThemAll() {
-	dir := flag.Arg(1)
-
-	fdir, err := os.Open(dir)
-	must(err)
-	defer fdir.Close()
-
-	names, err := fdir.Readdirnames(-1)
-	must(err)
-
-	for _, name := range names {
-		app.tagSingle(dir+"/"+name, "")
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-func (app *App) tagSingle(dir, sourceId string) {
-	r, err := arbitrage.FromFile(dir)
-	db := app.GetDatabase()
-	must(err)
-
-	sourceIds := make([]string, 0)
-	if sourceId == "" {
-		releases := make([]*arbitrage.Release, 0)
-		must(db.Where(&arbitrage.Release{
-			Hash: r.Hash,
-		}).Find(&releases).Error)
-
-		for _, other := range releases {
-			sourceIds = append(sourceIds, fmt.Sprintf("%s:%d", other.Source, other.SourceId))
-		}
-	} else {
-		sourceIds = append(sourceIds, sourceId)
-	}
-
-	if len(sourceIds) == 0 {
-		return
-	}
-
-	info := &arbitrage.Info{
-		Version:     1,
-		FileHash:    r.Hash,
-		LastUpdated: time.Now(),
-		Releases:    make(map[string]arbitrage.InfoRelease),
-	}
-
-	for _, sourceId := range sourceIds {
-		source, id := cmd.ParseSourceId(sourceId)
-		if _, ok := app.Config.Sources[source]; !ok {
-			continue
-		}
-
-		c := app.APIForSource(source)
-		resp, err := c.Do("torrent", id)
-		if err != nil {
-			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
-			continue
-		}
-		gt, err := c.ParseResponseReleases(*resp)
-		if err != nil {
-			log.Printf("[%s] error - %s (%s)", sourceId, err, r.FilePath)
-			continue
-		}
-		info.Releases[source] = GroupToInfo(gt)
-		log.Printf("[%s] %s", sourceId, info.Releases[source])
-	}
-	if len(info.Releases) == 0 {
-		return
-	}
-
-	f, err := os.Create(dir + "/release.info.yaml")
-	must(err)
-
-	y, err := yaml.Marshal(info)
-	must(err)
-
-	_, err = f.Write(y)
-	must(err)
-
-	defer f.Close()
-
 }
 
 func GroupToInfo(gt model.GroupAndTorrents) arbitrage.InfoRelease {

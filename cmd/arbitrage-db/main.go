@@ -10,13 +10,17 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/boltdb/bolt"
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/arbitrage/pkg/model"
 
+	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
+	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
 const Usage = `Usage: arbitrage [command] [args...]
@@ -53,6 +57,7 @@ type App struct {
 }
 
 func (app *App) Run() {
+	app.HasDatabase = true
 	app.Init()
 
 	switch flag.Arg(0) {
@@ -99,4 +104,41 @@ func (app *App) CrossReference(typ string, source string, id int64, target strin
 	}
 
 	return dest.SourceId, nil
+}
+func (app *App) GetDatabaseForSource(source string) *gorm.DB {
+	if db, ok := app.Indexes[source]; ok {
+		return db
+	}
+
+	var db *gorm.DB
+	var err error
+	switch app.Config.DatabaseType {
+	case "sqlite3":
+		db, err = gorm.Open("sqlite3", app.Config.Database+"/"+source+".db")
+		must(err)
+		db.DB().SetMaxOpenConns(1)
+	default:
+		var cfg = strings.Replace(app.Config.Database, "arbitrage_db", "arbitrage_"+source, -1)
+		db, err = gorm.Open(app.Config.DatabaseType, cfg)
+	}
+	must(err)
+	app.Indexes[source] = db
+
+	if source == "arbitrage" {
+		inited := db.HasTable(arbitrage.Response{})
+		must(db.AutoMigrate(&arbitrage.Release{}).Error)
+		must(db.AutoMigrate(&arbitrage.Response{}).Error)
+		if !inited {
+			db.Model(arbitrage.Response{}).AddIndex("idx_source_id", "source", "type", "type_id")
+		}
+	} else {
+		must(db.AutoMigrate(model.Torrent{}).Error)
+		must(db.AutoMigrate(model.Group{}).Error)
+	}
+
+	return db
+}
+
+func (app *App) GetDatabase() *gorm.DB {
+	return app.GetDatabaseForSource("arbitrage")
 }
