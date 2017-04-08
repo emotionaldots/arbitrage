@@ -16,7 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/emotionaldots/arbitrage/pkg/api/gazelle"
 	"github.com/emotionaldots/arbitrage/pkg/api/waffles"
-	"github.com/jinzhu/gorm"
+	"github.com/shibukawa/configdir"
 )
 
 var UserAgent = "arbitrage/2017-04-08"
@@ -44,17 +44,15 @@ type App struct {
 	HasDatabase bool
 	ConfigDir   string
 	Config      Config
-	DB          *gorm.DB
-	Indexes     map[string]*gorm.DB
 	ApiClients  map[string]API
 }
 
 func (app *App) Init() {
 	flag.Parse()
 	app.ApiClients = make(map[string]API)
-	app.Indexes = make(map[string]*gorm.DB)
 
-	app.ConfigDir = os.Getenv("HOME") + "/.config/arbitrage"
+	cfdir := configdir.New("", "arbitrage")
+	app.ConfigDir = cfdir.QueryFolders(configdir.Local)[0].Path
 	app.Config.Server = "https://arbitrage.invariant.space"
 
 	if app.HasDatabase {
@@ -70,6 +68,7 @@ func (app *App) Init() {
 		f, err = os.Create(app.ConfigDir + "/config.toml")
 		must(err)
 		must(toml.NewEncoder(f).Encode(app.Config))
+		log.Println("Created new config in " + app.ConfigDir + "/config.toml")
 	} else {
 		must(err)
 		_, err = toml.DecodeReader(f, &app.Config)

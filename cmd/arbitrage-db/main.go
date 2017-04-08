@@ -47,16 +47,18 @@ func dbSource(r arbitrage.Release) arbitrage.Release {
 
 func main() {
 	app := App{}
-	app.Databases = make(map[string]*bolt.DB)
 	app.Run()
 }
 
 type App struct {
 	cmd.App
 	Databases map[string]*bolt.DB
+	Indexes   map[string]*gorm.DB
 }
 
 func (app *App) Run() {
+	app.Databases = make(map[string]*bolt.DB)
+	app.Indexes = make(map[string]*gorm.DB)
 	app.HasDatabase = true
 	app.Init()
 
