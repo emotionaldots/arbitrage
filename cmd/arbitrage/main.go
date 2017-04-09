@@ -130,7 +130,7 @@ func (app *App) GetTorrentName(torrent []byte) (string, error) {
 }
 
 func (app *App) SaveTorrent(torrent []byte, path string) error {
-	return ioutil.WriteFile(path, torrent, 0x600)
+	return ioutil.WriteFile(path, torrent, 0x0600)
 }
 
 type job struct {
@@ -221,7 +221,7 @@ func (app *App) DownThemAll() {
 					status = "renamed"
 					fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", job.LocalDir, path, source, other.Id)
 				} else {
-					fmt.Fprintf(lw, "# ok %s:%d %q\n", source, other.Id, other.FilePath)
+					fmt.Fprintf(lw, "# ok %s:%d %q\n", source, other.Id, path)
 				}
 
 				tfile := fmt.Sprintf("%s-%d-%s.torrent", source, other.Id, status)
