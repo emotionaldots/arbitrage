@@ -9,8 +9,10 @@ import (
 	"html"
 	"io/ioutil"
 	"log"
+	"strings"
 
 	"github.com/boltdb/bolt"
+	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
 	"github.com/emotionaldots/arbitrage/pkg/model"
 	"github.com/jinzhu/gorm"
@@ -45,13 +47,21 @@ func updateIndex(db *gorm.DB, m interface{}) error {
 func (app *App) Recalculate() {
 	typ := flag.Arg(1)
 	source := flag.Arg(2)
+	id := 0
+	if strings.Contains(flag.Arg(2), ":") {
+		source, id = cmd.ParseSourceId(flag.Arg(2))
+	}
 
 	archive := app.OpenBolt(source)
 	must(archive.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(typ))
 		c := b.Cursor()
+		k, v := c.First()
+		if id > 0 {
+			k, v = c.Seek([]byte(arbitrage.Pad(id)))
+		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k != nil {
 			r, err := gzip.NewReader(bytes.NewReader(v))
 			must(err)
 			body, err := ioutil.ReadAll(r)
@@ -66,6 +76,7 @@ func (app *App) Recalculate() {
 			if _, err := app.IndexResponse(resp); err != nil {
 				log.Printf("[%v] err: %s", resp, err.Error())
 			}
+			k, v = c.Next()
 		}
 		return nil
 	}))
@@ -80,7 +91,9 @@ func (app *App) IndexResponse(resp arbitrage.Response) (model.GroupAndTorrents, 
 	if err != nil {
 		return gt, err
 	}
-	must(updateIndex(idx, gt))
+	if err := updateIndex(idx, gt); err != nil {
+		return gt, err
+	}
 
 	for _, t := range gt.Torrents {
 		r := arbitrage.Release{
