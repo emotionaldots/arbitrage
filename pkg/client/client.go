@@ -37,6 +37,10 @@ type queryRequest struct {
 	Hashes []string `json:"hashes"`
 }
 
+type queryResult struct {
+	Torrents []Release `json:"torrents"`
+}
+
 type Response struct {
 	Status string           `json:"status"`
 	Error  string           `json:"error"`
@@ -96,7 +100,7 @@ func (c *Client) Query(source string, hashes []string) ([]Release, error) {
 		return nil, err
 	}
 
-	var releases []Release
-	err = json.Unmarshal(*result.Result, &releases)
-	return releases, err
+	var qresult queryResult
+	err = json.Unmarshal(*result.Result, &qresult)
+	return qresult.Torrents, err
 }
