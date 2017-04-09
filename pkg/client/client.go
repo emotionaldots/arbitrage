@@ -55,7 +55,7 @@ func (r Response) IsErr() error {
 }
 
 func (c *Client) Query(source string, hashes []string) ([]Release, error) {
-	time.Sleep(c.LastTime.Add(2 * time.Second).Sub(time.Now()))
+	time.Sleep(c.LastTime.Add(2000 * time.Millisecond).Sub(time.Now()))
 	c.LastTime = time.Now()
 
 	if source == "" {
@@ -102,5 +102,6 @@ func (c *Client) Query(source string, hashes []string) ([]Release, error) {
 
 	var qresult queryResult
 	err = json.Unmarshal(*result.Result, &qresult)
+	c.LastTime = time.Now()
 	return qresult.Torrents, err
 }

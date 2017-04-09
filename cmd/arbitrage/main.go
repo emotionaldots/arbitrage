@@ -82,6 +82,7 @@ func (app *App) Lookup() {
 	dir := flag.Arg(2)
 	r, err := arbitrage.FromFile(dir)
 	must(err)
+	arbitrage.HashDefault(r)
 
 	c := client.New(app.Config.Server, cmd.UserAgent)
 	releases, err := c.Query(source, []string{dir})
@@ -141,6 +142,7 @@ func (app *App) batchQueryDirectory(dir, source string) chan []job {
 		for _, n := range names {
 			r, err := arbitrage.FromFile(dir + "/" + n)
 			must(err)
+			arbitrage.HashDefault(r)
 
 			if len(jobs) >= 100 {
 				doQuery()
@@ -168,7 +170,7 @@ func (app *App) DownThemAll() {
 	lw := io.MultiWriter(os.Stdout, logf)
 	fmt.Fprintf(logf, "#!/usr/bin/env bash\n## arbitrage downthemall %s %q\n\n\n", source, dir)
 
-	for jobs := range app.batchQueryDirectory(source, dir) {
+	for jobs := range app.batchQueryDirectory(dir, source) {
 		for _, job := range jobs {
 			for _, other := range job.Releases {
 				status := "ok"
