@@ -7,9 +7,8 @@ package cmd
 
 import (
 	"errors"
-	"io"
+	"io/ioutil"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
@@ -61,20 +60,13 @@ func (w *WafflesAPI) ParseResponseReleases(resp arbitrage.Response) (model.Group
 	return model.NormalizeTorrentGroups(t)
 }
 
-func (w *WafflesAPI) Download(id int, suffix string) error {
+func (w *WafflesAPI) Download(id int) ([]byte, error) {
 	body, err := w.DownloadTorrent(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	f, err := os.Create(w.Source + "-" + strconv.Itoa(id) + suffix + ".torrent")
-	defer f.Close()
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(f, body)
-	return err
+	defer body.Close()
+	return ioutil.ReadAll(body)
 }
 
 func (w *WafflesAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRelease {

@@ -8,11 +8,9 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/emotionaldots/arbitrage/pkg/api/gazelle"
@@ -23,7 +21,7 @@ import (
 type API interface {
 	Login(username, password string) error
 	Do(typ string, id int) (resp *arbitrage.Response, err error)
-	Download(id int, suffix string) error
+	Download(id int) ([]byte, error)
 	ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error)
 }
 
@@ -59,29 +57,21 @@ func (w *GazelleAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 	return resp, nil
 }
 
-func (w *GazelleAPI) Download(id int, suffix string) error {
+func (w *GazelleAPI) Download(id int) ([]byte, error) {
 	u, err := w.CreateDownloadURL(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	resp, err := http.Get(u)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return errors.New("unexpected status: " + resp.Status)
+		return nil, errors.New("unexpected status: " + resp.Status)
 	}
 	defer resp.Body.Close()
-
-	f, err := os.Create(w.Source + "-" + strconv.Itoa(id) + suffix + ".torrent")
-	defer f.Close()
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(f, resp.Body)
-	return err
+	return ioutil.ReadAll(resp.Body)
 }
 
 func (w *GazelleAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {

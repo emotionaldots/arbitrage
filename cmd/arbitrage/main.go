@@ -6,14 +6,17 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
 	"github.com/emotionaldots/arbitrage/pkg/client"
@@ -102,7 +105,32 @@ func (app *App) Lookup() {
 func (app *App) Download() {
 	source, id := cmd.ParseSourceId(flag.Arg(1))
 	c := app.DoLogin(source)
-	must(c.Download(id, ""))
+
+	torrent, err := c.Download(id)
+	must(err)
+
+	name, err := app.GetTorrentName(torrent)
+	must(err)
+	log.Println(name)
+
+	path := source + "-" + strconv.Itoa(id) + ".torrent"
+	must(app.SaveTorrent(torrent, path))
+}
+
+func (app *App) GetTorrentName(torrent []byte) (string, error) {
+	mi, err := metainfo.Load(bytes.NewReader(torrent))
+	if err != nil {
+		return "", err
+	}
+	i, err := mi.UnmarshalInfo()
+	if err != nil {
+		return "", err
+	}
+	return i.Name, nil
+}
+
+func (app *App) SaveTorrent(torrent []byte, path string) error {
+	return ioutil.WriteFile(path, torrent, 0x600)
 }
 
 type job struct {
@@ -177,23 +205,28 @@ func (app *App) DownThemAll() {
 	for jobs := range app.batchQueryDirectory(dir, source) {
 		for _, job := range jobs {
 			for _, other := range job.Releases {
-				status := "ok"
-				if other.FilePath == "" {
-					status = "no_filepath"
-				} else if job.LocalDir != other.FilePath {
-					status = "renamed"
-				}
-
-				if err := c.Download(int(other.Id), "-"+status); err != nil {
-					log.Printf("[%s:%d] Could not download torrent: %s\n", source, other.Id, err)
+				torrent, err := c.Download(int(other.Id))
+				if err != nil {
+					log.Printf("[%s:%d] Could not download torrent, skipping: %s\n", source, other.Id, err)
 					continue
 				}
 
-				if status == "renamed" {
-					fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", job.LocalDir, other.FilePath, source, other.Id)
+				path, err := app.GetTorrentName(torrent)
+				if err != nil {
+					log.Printf("[%s:%d] Invalid torrent file, skipping: %s\n", source, other.Id, err)
+				}
+
+				status := "ok"
+				if job.LocalDir != path {
+					status = "renamed"
+					fmt.Fprintf(lw, "mv %q %q    # %s:%d\n", job.LocalDir, path, source, other.Id)
 				} else {
 					fmt.Fprintf(lw, "# ok %s:%d %q\n", source, other.Id, other.FilePath)
 				}
+
+				tfile := fmt.Sprintf("%s-%d-%s.torrent", source, other.Id, status)
+				must(app.SaveTorrent(torrent, tfile))
+
 				time.Sleep(200 * time.Millisecond) // Rate-limiting
 				break
 			}
