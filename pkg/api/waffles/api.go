@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
@@ -277,6 +278,39 @@ func ParseTitle(artist, title string, r *model.TorrentAndGroup) error {
 	}
 
 	return nil
+}
+
+func (w *API) CreateDownloadURL(id int) (string, error) {
+	if !w.loggedIn {
+		return "", errRequestFailedLogin
+	}
+
+	params := url.Values{}
+	path := "download.php/" + w.uid + "/" + strconv.Itoa(id) + "/name.torrent"
+	downloadURL, err := buildURL(w.baseURL, path, "", params)
+	return downloadURL, err
+}
+
+func (w *API) DownloadTorrent(id int) (io.ReadCloser, error) {
+	u, err := w.CreateDownloadURL(id)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", u, nil)
+	req.Header.Set("User-Agent", w.userAgent)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, errors.New("unexpected status: " + resp.Status)
+	}
+
+	return resp.Body, nil
 }
 
 func isEncoding(v string) bool {
