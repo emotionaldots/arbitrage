@@ -52,7 +52,7 @@ func (app *App) Init() {
 	app.ApiClients = make(map[string]API)
 
 	cfdir := configdir.New("", "arbitrage")
-	app.ConfigDir = cfdir.QueryFolders(configdir.Local)[0].Path
+	app.ConfigDir = cfdir.QueryFolders(configdir.Global)[0].Path
 	app.Config.Server = "https://arbitrage.invariant.space"
 
 	if app.HasDatabase {
