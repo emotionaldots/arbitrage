@@ -85,7 +85,7 @@ func (app *App) Lookup() {
 	arbitrage.HashDefault(r)
 
 	c := client.New(app.Config.Server, cmd.UserAgent)
-	releases, err := c.Query(source, []string{dir})
+	releases, err := c.Query(source, []string{r.Hash})
 	must(err)
 
 	for _, other := range releases {
@@ -132,6 +132,10 @@ func (app *App) batchQueryDirectory(dir, source string) chan []job {
 			byHash := make(map[string][]client.Release, 0)
 			for _, r := range releases {
 				byHash[r.Hash] = append(byHash[r.Hash], r)
+			}
+			for i, job := range jobs {
+				job.Releases = byHash[job.Hash]
+				jobs[i] = job
 			}
 
 			queue <- jobs
