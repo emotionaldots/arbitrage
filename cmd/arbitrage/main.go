@@ -16,9 +16,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/emotionaldots/arbitrage/cmd"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
+	"github.com/emotionaldots/arbitrage/pkg/arbitrage/torrentinfo"
 	"github.com/emotionaldots/arbitrage/pkg/client"
 	"github.com/emotionaldots/arbitrage/pkg/model"
 )
@@ -118,7 +118,7 @@ func (app *App) Download() {
 }
 
 func (app *App) GetTorrentName(torrent []byte) (string, error) {
-	mi, err := metainfo.Load(bytes.NewReader(torrent))
+	mi, err := torrentinfo.Load(bytes.NewReader(torrent))
 	if err != nil {
 		return "", err
 	}
@@ -155,8 +155,16 @@ func (app *App) batchQueryDirectory(dir, source string) chan []job {
 		jobs := make([]job, 0, 100)
 
 		doQuery := func() {
-			releases, err := c.Query(source, hashes)
+			var releases []client.Release
+			for i := 0; i < 3; i++ {
+				if releases, err = c.Query(source, hashes); err == nil {
+					break
+				}
+				log.Printf("error on try %d/3: %s", i, err)
+				time.Sleep(5 * time.Second)
+			}
 			must(err)
+
 			byHash := make(map[string][]client.Release, 0)
 			for _, r := range releases {
 				byHash[r.Hash] = append(byHash[r.Hash], r)

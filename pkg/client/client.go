@@ -55,7 +55,7 @@ func (r Response) IsErr() error {
 }
 
 func (c *Client) Query(source string, hashes []string) ([]Release, error) {
-	time.Sleep(c.LastTime.Add(2000 * time.Millisecond).Sub(time.Now()))
+	time.Sleep(c.LastTime.Add(2500 * time.Millisecond).Sub(time.Now()))
 	c.LastTime = time.Now()
 
 	if source == "" {
