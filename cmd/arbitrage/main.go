@@ -130,7 +130,7 @@ func (app *App) GetTorrentName(torrent []byte) (string, error) {
 }
 
 func (app *App) SaveTorrent(torrent []byte, path string) error {
-	return ioutil.WriteFile(path, torrent, 0x0600)
+	return ioutil.WriteFile(path, torrent, 0600)
 }
 
 type job struct {
