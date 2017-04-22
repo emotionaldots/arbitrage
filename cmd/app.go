@@ -54,11 +54,11 @@ func (app *App) Init() {
 	cfdir := configdir.New("", "arbitrage")
 	app.ConfigDir = cfdir.QueryFolders(configdir.Global)[0].Path
 	app.Config.Server = "https://arbitrage.invariant.space"
+	app.Config.Sources = make(map[string]Source)
 
 	if app.HasDatabase {
 		app.Config.DatabaseType = "sqlite3"
 		app.Config.Database = app.ConfigDir
-		app.Config.Sources = make(map[string]Source)
 	}
 
 	f, err := os.Open(app.ConfigDir + "/config.toml")
