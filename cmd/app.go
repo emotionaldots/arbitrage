@@ -63,7 +63,9 @@ func (app *App) Init() {
 
 	f, err := os.Open(app.ConfigDir + "/config.toml")
 	if os.IsNotExist(err) {
-		app.Config.Sources["example"] = Source{Url: "https://example.com"}
+		app.Config.Sources["red"] = Source{Url: "https://redacted.ch"}
+		app.Config.Sources["apl"] = Source{Url: "https://apollo.rip"}
+		app.Config.Sources["wfl"] = Source{Url: "https://waffles.ch"}
 		must(os.MkdirAll(app.ConfigDir, 0755))
 		f, err = os.Create(app.ConfigDir + "/config.toml")
 		must(err)
