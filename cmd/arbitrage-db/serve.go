@@ -20,8 +20,8 @@ import (
 func (app *App) Serve() {
 	ipLookups := []string{"RemoteAddr"}
 
-	shortLim := tollbooth.NewLimiter(5, 10*time.Second)
-	shortLim.IPLookups = ipLookups
+	// shortLim := tollbooth.NewLimiter(5, 10*time.Second)
+	// shortLim.IPLookups = ipLookups
 
 	longLim := tollbooth.NewLimiter(10000, 3*24*time.Hour)
 	longLim.IPLookups = ipLookups
@@ -40,7 +40,7 @@ func (app *App) Serve() {
 	r.HandleFunc("/api/query", app.handleApiQuery)
 
 	h := tollbooth.LimitHandler(longLim, r)
-	h = tollbooth.LimitHandler(shortLim, h)
+	// h = tollbooth.LimitHandler(shortLim, h)
 	h = handlers.CombinedLoggingHandler(os.Stdout, h)
 	h = handlers.ProxyHeaders(h)
 	h = handlers.RecoveryHandler()(h)
