@@ -20,10 +20,10 @@ import (
 func (app *App) Serve() {
 	ipLookups := []string{"RemoteAddr"}
 
-	// shortLim := tollbooth.NewLimiter(5, 10*time.Second)
-	// shortLim.IPLookups = ipLookups
+	shortLim := tollbooth.NewLimiter(5, 2*time.Second)
+	shortLim.IPLookups = ipLookups
 
-	longLim := tollbooth.NewLimiter(10000, 3*24*time.Hour)
+	longLim := tollbooth.NewLimiter(10000, 30*time.Second)
 	longLim.IPLookups = ipLookups
 
 	r := mux.NewRouter()
@@ -32,7 +32,7 @@ func (app *App) Serve() {
 		r.HandleFunc("/"+source+"/ajax.php", app.handleAjax)
 	}
 
-	batchLim := tollbooth.NewLimiter(500, 10*24*time.Hour)
+	batchLim := tollbooth.NewLimiter(500, 30*time.Minute)
 	batchLim.IPLookups = ipLookups
 	fmt.Println("http://localhost:8321/api/query")
 	fmt.Println("http://localhost:8321/api/query_batch")
