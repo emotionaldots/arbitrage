@@ -98,7 +98,7 @@ func (app *App) Lookup() {
 		} else if r.FilePath != other.FilePath {
 			state = "renamed"
 		}
-		fmt.Printf("%s %s:%d %q\n", state, source, other.Id, `"`+other.FilePath+`"`)
+		fmt.Printf("%s %s:%d %q\n", state, source, other.Id, other.FilePath)
 	}
 }
 
