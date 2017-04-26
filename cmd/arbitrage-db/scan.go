@@ -43,7 +43,7 @@ func (app *App) ScanTracker(sourceId string, responses chan *arbitrage.Response)
 		if err != nil {
 			log.Printf("[%s:%d] %s", source, id, err)
 
-			if err.Error() == "Request failed: bad id parameter" {
+			if err.Error() == "Request failed: bad id parameter" || err.Error() == "Parsing failed: no filelist found" {
 				if id > maxId {
 					time.Sleep(backoff)
 					if _, err := c.Do("torrent", id+200); err == nil {

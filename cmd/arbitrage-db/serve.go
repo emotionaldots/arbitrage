@@ -119,8 +119,9 @@ func jsonError(w http.ResponseWriter, err string, code int) {
 }
 
 type minimalRelease struct {
-	Id   int64  `json:"id"`
-	Hash string `json:"hash"`
+	Id       int64  `json:"id"`
+	Hash     string `json:"hash"`
+	FilePath string `json:"filePath"`
 }
 
 func (app *App) handleApiQueryBatch(w http.ResponseWriter, r *http.Request) {
@@ -195,8 +196,9 @@ func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
 	result := make([]minimalRelease, len(releases))
 	for i, r := range releases {
 		result[i] = minimalRelease{
-			Id:   r.SourceId,
-			Hash: r.Hash,
+			Id:       r.SourceId,
+			Hash:     r.Hash,
+			FilePath: r.FilePath,
 		}
 	}
 
