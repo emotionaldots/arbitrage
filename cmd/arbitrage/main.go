@@ -222,6 +222,7 @@ func (app *App) DownThemAll() {
 				path, err := app.GetTorrentName(torrent)
 				if err != nil {
 					log.Printf("[%s:%d] Invalid torrent file, skipping: %s\n", source, other.Id, err)
+					continue
 				}
 
 				status := "ok"
