@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/emotionaldots/arbitrage/pkg/model"
+	"github.com/emotionaldots/arbitrage/pkg/model/fixes"
 )
 
 func NewAPI(url, agent string) (*API, error) {
@@ -158,4 +159,11 @@ func (w *API) GetTorrentGroup(id int, params url.Values) (model.GroupAndTorrents
 	params.Set("id", strconv.Itoa(id))
 	err := w.Do("torrentgroup", params, &result)
 	return result, err
+}
+
+func (w *API) GetCollage(id int, params url.Values) (model.CollageWithGroups, error) {
+	var result fixes.CollageWithStringedGroups
+	params.Set("id", strconv.Itoa(id))
+	err := w.Do("collage", params, &result)
+	return result.Fix(), err
 }

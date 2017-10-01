@@ -31,6 +31,8 @@ func (r response) checkStatus() error {
 	return nil
 }
 
+// Command "import" imports all metadata responses from the "wcdjson.zip"
+// archive into our BoltDB archive.
 func (app *App) Import() {
 	source := flag.Arg(1)
 

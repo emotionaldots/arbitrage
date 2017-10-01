@@ -14,7 +14,6 @@ import (
 
 	"github.com/emotionaldots/arbitrage/pkg/api/waffles"
 	"github.com/emotionaldots/arbitrage/pkg/arbitrage"
-	"github.com/emotionaldots/arbitrage/pkg/model"
 )
 
 type WafflesAPI struct {
@@ -45,19 +44,17 @@ func (w *WafflesAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 	return resp, nil
 }
 
-func (w *WafflesAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {
-	g := model.GroupAndTorrents{}
-
+func (w *WafflesAPI) ParseResponseReleases(resp arbitrage.Response) (interface{}, error) {
 	if resp.Type != "torrent" && resp.Type != "torrent.html" {
-		return g, errors.New("API: unexpected response type: " + resp.Type)
+		return nil, errors.New("API: unexpected response type: " + resp.Type)
 	}
 
 	t, err := w.ParseTorrent([]byte(resp.Response))
 	if err != nil {
-		return g, err
+		return nil, err
 	}
 
-	return model.NormalizeTorrentGroups(t)
+	return interface{}(t), nil
 }
 
 func (w *WafflesAPI) Download(id int) ([]byte, error) {
@@ -92,7 +89,7 @@ func (w *WafflesAPI) ResponseToInfo(resp *arbitrage.Response) arbitrage.InfoRele
 		r.CatalogueNumber = t.Torrent.RemasterCatalogueNumber
 		r.Edition = t.Torrent.RemasterTitle
 	} else {
-		r.Year = t.Group.Year
+		r.Year = int(t.Group.Year)
 		r.RecordLabel = t.Group.RecordLabel
 		r.CatalogueNumber = t.Group.CatalogueNumber
 		r.Edition = "Original Release"

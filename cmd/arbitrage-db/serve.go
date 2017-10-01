@@ -17,12 +17,16 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Command "serve" starts the HTTP API server, so clients can query
+// for releases or browse the tracker archives.
 func (app *App) Serve() {
 	ipLookups := []string{"RemoteAddr"}
 
+	// Rate limit: one request every 2 seconds allowed, with a burst rate of 5
 	shortLim := tollbooth.NewLimiter(5, 2*time.Second)
 	shortLim.IPLookups = ipLookups
 
+	// Crawling limit: We only allow 10k requests in a span of 3 days
 	longLim := tollbooth.NewLimiter(10000, 30*time.Second)
 	longLim.IPLookups = ipLookups
 
@@ -32,6 +36,7 @@ func (app *App) Serve() {
 		r.HandleFunc("/"+source+"/ajax.php", app.handleAjax)
 	}
 
+	// The batch API is a lot more limited: max. 500 requests in 10 days
 	batchLim := tollbooth.NewLimiter(500, 30*time.Minute)
 	batchLim.IPLookups = ipLookups
 	fmt.Println("http://localhost:8321/api/query")
@@ -53,6 +58,10 @@ type AjaxResult struct {
 	Response interface{} `json:"response"`
 }
 
+// handleAjax provides an API that is very similar to the original Gazelle
+// one, serving torrents, groups and collages from the database for a single tracker source.
+// It allows cross-referencing releases from other trackers with a special
+// parameter "xref=[source]".
 func (app *App) handleAjax(w http.ResponseWriter, r *http.Request) {
 	source := strings.TrimLeft(path.Dir(r.URL.Path), "/")
 	if _, ok := app.Config.Sources[source]; !ok {
@@ -124,6 +133,10 @@ type minimalRelease struct {
 	FilePath string `json:"filePath"`
 }
 
+// handleApiQueryBatch provides batch functionality for the hash-based
+// lookup of the arbitrage client.
+// The client submits a list of filelist hashes and we return a number
+// of tracker IDs that match the given hashes.
 func (app *App) handleApiQueryBatch(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	if r.Method != "POST" {
@@ -167,6 +180,9 @@ func (app *App) handleApiQueryBatch(w http.ResponseWriter, r *http.Request) {
 	w.Write(raw)
 }
 
+// handleApiQuery provides a hash-based lookup for the arbitrage client.
+// The client submits a filelist hash and we return a tracker ID that
+// matches the release, if found.
 func (app *App) handleApiQuery(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 

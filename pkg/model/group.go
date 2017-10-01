@@ -1,6 +1,9 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type Group struct {
 	WikiBody            string    `json:"wikiBody"`
@@ -11,7 +14,7 @@ type Group struct {
 	RecordLabel         string    `json:"recordLabel"`
 	CatalogueNumber     string    `json:"catalogueNumber"`
 	ReleaseType         int       `json:"releaseType"`
-	CategoryID          int       `json:"caregoryId"`
+	CategoryID          int       `json:"categoryId"`
 	CategoryName        string    `json:"categoryName"`
 	Time                string    `json:"time"`
 	VanityHouse         bool      `json:"vanityHouse"`
@@ -47,4 +50,16 @@ type MusicInfo struct {
 type ArtistLink struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+func (g Group) String() string {
+	artist := "Various Artists"
+	n := len(g.MusicInfo.Artists)
+	if n == 0 {
+		artist = "Unknown"
+	} else if n == 1 {
+		artist = g.MusicInfo.Artists[0].Name
+	}
+
+	return fmt.Sprintf("group %d: %s - %s", g.ID, artist, g.Name)
 }

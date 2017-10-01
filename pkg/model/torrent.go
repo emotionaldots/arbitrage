@@ -1,5 +1,7 @@
 package model
 
+import "fmt"
+
 type Torrent struct {
 	ID                      int    `json:"id"`
 	GroupID                 int    `json:"groupID"`
@@ -27,4 +29,8 @@ type Torrent struct {
 	FilePath                string `json:"filePath"`
 	UserID                  int    `json:"userID"`
 	Username                string `json:"username"`
+}
+
+func (t Torrent) String() string {
+	return fmt.Sprintf("torrent %d: %s [%s-%s]", t.ID, t.FilePath, t.Media, t.Format)
 }

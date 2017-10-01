@@ -37,6 +37,7 @@ func must(err error) {
 	}
 }
 
+// dbSource returns the composite primary key for an individual release hash.
 func dbSource(r arbitrage.Release) arbitrage.Release {
 	return arbitrage.Release{
 		Source:   r.Source,
@@ -52,12 +53,12 @@ func main() {
 
 type App struct {
 	cmd.App
-	Databases map[string]*bolt.DB
-	Indexes   map[string]*gorm.DB
+	Archives map[string]*bolt.DB
+	Indexes  map[string]*gorm.DB
 }
 
 func (app *App) Run() {
-	app.Databases = make(map[string]*bolt.DB)
+	app.Archives = make(map[string]*bolt.DB)
 	app.Indexes = make(map[string]*gorm.DB)
 	app.HasDatabase = true
 	app.Init()
@@ -71,8 +72,6 @@ func (app *App) Run() {
 		app.Serve()
 	case "import":
 		app.Import()
-	case "convert":
-		app.Convert()
 	case "list":
 		app.List()
 	case "fetch":
@@ -82,6 +81,9 @@ func (app *App) Run() {
 	}
 }
 
+// CrossReference searches a for a given torrent in the index,
+// looks up its filelist hash and finds identical releases in another
+// tracker index, returnings its ID if found.
 func (app *App) CrossReference(typ string, source string, id int64, target string) (int64, error) {
 	if typ != "torrent" {
 		return 0, errors.New("Type " + typ + " not implemented")
@@ -89,6 +91,7 @@ func (app *App) CrossReference(typ string, source string, id int64, target strin
 
 	db := app.GetDatabase()
 
+	// Lookup hash by tracker id
 	src := arbitrage.Release{
 		Source:   source,
 		SourceId: id,
@@ -97,6 +100,7 @@ func (app *App) CrossReference(typ string, source string, id int64, target strin
 		return 0, err
 	}
 
+	// Lookup other tracker id based on hash
 	dest := arbitrage.Release{
 		Source: target,
 		Hash:   src.Hash,
@@ -107,6 +111,9 @@ func (app *App) CrossReference(typ string, source string, id int64, target strin
 
 	return dest.SourceId, nil
 }
+
+// GetDatabaseForSource opens an indexer database for the given tracker source,
+// or initializes it if not already present.
 func (app *App) GetDatabaseForSource(source string) *gorm.DB {
 	if db, ok := app.Indexes[source]; ok {
 		return db
@@ -136,11 +143,14 @@ func (app *App) GetDatabaseForSource(source string) *gorm.DB {
 	} else {
 		must(db.AutoMigrate(model.Torrent{}).Error)
 		must(db.AutoMigrate(model.Group{}).Error)
+		must(db.AutoMigrate(model.Collage{}).Error)
+		must(db.AutoMigrate(model.CollagesTorrents{}).Error)
 	}
 
 	return db
 }
 
+// GetDatabase is a convenienve fallback for the main release-hash database.
 func (app *App) GetDatabase() *gorm.DB {
 	return app.GetDatabaseForSource("arbitrage")
 }

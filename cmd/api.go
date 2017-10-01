@@ -22,7 +22,7 @@ type API interface {
 	Login(username, password string) error
 	Do(typ string, id int) (resp *arbitrage.Response, err error)
 	Download(id int) ([]byte, error)
-	ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error)
+	ParseResponseReleases(resp arbitrage.Response) (interface{}, error)
 }
 
 type GazelleAPI struct {
@@ -42,6 +42,8 @@ func (w *GazelleAPI) Do(typ string, id int) (resp *arbitrage.Response, err error
 	switch typ {
 	case "torrent":
 		result, err = w.GetTorrent(id, url.Values{})
+	case "collage":
+		result, err = w.GetCollage(id, url.Values{})
 	default:
 		return nil, errors.New("Unknown type: " + typ)
 	}
@@ -74,25 +76,29 @@ func (w *GazelleAPI) Download(id int) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
-func (w *GazelleAPI) ParseResponseReleases(resp arbitrage.Response) (model.GroupAndTorrents, error) {
-	g := model.GroupAndTorrents{}
-
+func (w *GazelleAPI) ParseResponseReleases(resp arbitrage.Response) (interface{}, error) {
 	var result interface{}
 	switch resp.Type {
 	case "torrent":
 		gt := model.TorrentAndGroup{}
 		if err := json.Unmarshal([]byte(resp.Response), &gt); err != nil {
-			return g, err
+			return nil, err
 		}
 		result = gt
 	case "torrentgroup":
 		gt := model.GroupAndTorrents{}
 		if err := json.Unmarshal([]byte(resp.Response), &gt); err != nil {
-			return g, err
+			return nil, err
 		}
 		result = gt
+	case "collage":
+		c := model.CollageWithGroups{}
+		if err := json.Unmarshal([]byte(resp.Response), &c); err != nil {
+			return nil, err
+		}
+		result = c
 	default:
-		return g, errors.New("API: unexpected response type: " + resp.Type)
+		return nil, errors.New("API: unexpected response type: " + resp.Type)
 	}
-	return model.NormalizeTorrentGroups(result)
+	return result, nil
 }
