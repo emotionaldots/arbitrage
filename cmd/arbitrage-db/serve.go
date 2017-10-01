@@ -23,12 +23,12 @@ func (app *App) Serve() {
 	ipLookups := []string{"RemoteAddr"}
 
 	// Rate limit: one request every 2 seconds allowed, with a burst rate of 5
-	shortLim := tollbooth.NewLimiter(5, 2*time.Second)
-	shortLim.IPLookups = ipLookups
+	shortLim := tollbooth.NewLimiter(5, 2*time.Second, nil)
+	shortLim.SetIPLookups(ipLookups)
 
 	// Crawling limit: We only allow 10k requests in a span of 3 days
-	longLim := tollbooth.NewLimiter(10000, 30*time.Second)
-	longLim.IPLookups = ipLookups
+	longLim := tollbooth.NewLimiter(10000, 30*time.Second, nil)
+	longLim.SetIPLookups(ipLookups)
 
 	r := mux.NewRouter()
 	for source := range app.Config.Sources {
@@ -37,8 +37,8 @@ func (app *App) Serve() {
 	}
 
 	// The batch API is a lot more limited: max. 500 requests in 10 days
-	batchLim := tollbooth.NewLimiter(500, 30*time.Minute)
-	batchLim.IPLookups = ipLookups
+	batchLim := tollbooth.NewLimiter(500, 30*time.Minute, nil)
+	batchLim.SetIPLookups(ipLookups)
 	fmt.Println("http://localhost:8321/api/query")
 	fmt.Println("http://localhost:8321/api/query_batch")
 	r.Handle("/api/query_batch", tollbooth.LimitFuncHandler(batchLim, app.handleApiQueryBatch))
